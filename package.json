@@ -11,7 +11,7 @@
     "build": "tsc -b",
     "lint": "eslint .",
     "typecheck": "pnpm build && pnpm typecheck:packages",
-    "typecheck:packages": "pnpm -r --if-present typecheck",
+    "typecheck:packages": "pnpm -r --if-present typecheck:tests",
     "test": "pnpm build && pnpm test:unit",
     "test:unit": "vitest run",
     "check": "pnpm build && pnpm lint && pnpm typecheck:packages && pnpm test:unit"
