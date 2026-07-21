@@ -10,9 +10,11 @@
     "clean": "tsc -b --clean && rm -rf coverage",
     "build": "tsc -b",
     "lint": "eslint .",
-    "typecheck": "pnpm -r --if-present typecheck",
-    "test": "vitest run",
-    "check": "pnpm build && pnpm lint && pnpm typecheck && pnpm test"
+    "typecheck": "pnpm build && pnpm typecheck:packages",
+    "typecheck:packages": "pnpm -r --if-present typecheck",
+    "test": "pnpm build && pnpm test:unit",
+    "test:unit": "vitest run",
+    "check": "pnpm build && pnpm lint && pnpm typecheck:packages && pnpm test:unit"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

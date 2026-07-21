@@ -12,7 +12,7 @@
   "scripts": {
     "build": "tsc -b tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run src"
+    "test": "pnpm --workspace-root build && vitest run --root ../.. --config vitest.config.ts packages/domain/src"
   },
   "dependencies": {
     "@opspulse/contracts": "workspace:*"
