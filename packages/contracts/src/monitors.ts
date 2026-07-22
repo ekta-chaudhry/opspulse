@@ -247,7 +247,7 @@ const HeartbeatPingPathSchema = z
   .string()
   .min(1)
   .max(2048)
-  .regex(/^\/v1\/heartbeats\/.+/);
+  .regex(/^\/v1\/heartbeats\/[A-Za-z0-9_-]{43,128}$/);
 const HeartbeatCredentialsSchema = z.strictObject({
   token: HeartbeatTokenSchema,
   pingPath: HeartbeatPingPathSchema,

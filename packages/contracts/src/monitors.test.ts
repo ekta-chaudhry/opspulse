@@ -706,7 +706,7 @@ describe("monitor query and channel contracts", () => {
 
 const heartbeatCredentials = {
   token: "a".repeat(43),
-  pingPath: "/v1/heartbeats/monitor-id",
+  pingPath: `/v1/heartbeats/${"a".repeat(43)}`,
 } as const;
 
 describe("monitor response envelopes", () => {
@@ -780,6 +780,17 @@ describe("monitor response envelopes", () => {
       "",
       "/v1/monitors/id",
       "https://example.com/v1/heartbeats/id",
+      `/v1/heartbeats/${"a".repeat(43)}\n`,
+      `/v1/heartbeats/${"a".repeat(43)}\r`,
+      `/v1/heartbeats/${"a".repeat(43)}\t`,
+      `/v1/heartbeats/${"a".repeat(43)}\u0001`,
+      `/v1/heartbeats/${"a".repeat(43)}\u007f`,
+      `/v1/heartbeats/${"a".repeat(43)}/extra`,
+      `/v1/heartbeats/${"a".repeat(43)}?query=true`,
+      `/v1/heartbeats/${"a".repeat(43)}#fragment`,
+      `/v1/heartbeats/${"a".repeat(42)}+`,
+      `/v1/heartbeats/${"a".repeat(42)}`,
+      `/v1/heartbeats/${"a".repeat(129)}`,
       `/v1/heartbeats/${"x".repeat(2034)}`,
     ]) {
       expect(CreateMonitorResponseSchema.safeParse({
