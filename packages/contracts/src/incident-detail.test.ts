@@ -7,6 +7,7 @@ const eventId = "b7d6f4a6-0b1d-4b55-9a34-5072f6116c43";
 const deliveryId = "7263b827-013d-4426-8657-e2ea2bc1f3f1";
 const secondDeliveryId = "5f5502a0-38ef-4aad-9f9a-d9311716da2e";
 const channelId = "2bd75d4f-a17b-4b4c-9f96-6c9d8fd786aa";
+const notificationEventId = "35e6d1c3-64ef-4a32-b2e4-b8184c516aea";
 const timestamp = "2026-07-22T12:00:00.0001Z";
 const nextAttemptAt = "2026-07-22T12:05:00Z";
 const cause = {
@@ -47,6 +48,17 @@ const delivery = {
   createdAt: timestamp,
   updatedAt: timestamp,
   status: "queued",
+} as const;
+const notificationQueuedEvent = {
+  id: notificationEventId,
+  incidentId,
+  occurredAt: timestamp,
+  type: "notification_queued",
+  details: {
+    deliveryId,
+    channelId,
+    payloadVersion: "opspulse.webhook.v1",
+  },
 } as const;
 const response = {
   incident,
@@ -201,5 +213,105 @@ describe("incident detail response", () => {
       ...response,
       deliveries: [{ ...delivery, id: secondDeliveryId, channelId: monitorId }],
     }).success).toBe(true);
+  });
+
+  it("allows deliveries to reference only opened or resolved transition events", () => {
+    const invalidSourceEvents = [
+      {
+        ...timelineEvent,
+        type: "failure_observed",
+        details: { previousCause: cause, nextCause: cause },
+      },
+      {
+        ...timelineEvent,
+        type: "recovery_observed",
+        details: { consecutiveSuccesses: 1, recoveryThreshold: 1 },
+      },
+      {
+        ...timelineEvent,
+        type: "notification_queued",
+        details: notificationQueuedEvent.details,
+      },
+    ] as const;
+    for (const sourceEvent of invalidSourceEvents) {
+      const result = IncidentDetailResponseSchema.safeParse({
+        ...response,
+        timeline: [sourceEvent],
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((issue) =>
+          issue.path.join(".") === "deliveries.0.incidentEventId" &&
+            issue.message ===
+              "delivery incidentEventId must reference an opened or resolved timeline event"
+        )).toBe(true);
+      }
+    }
+  });
+
+  it("requires notification_queued deliveryId to resolve to an envelope delivery", () => {
+    const result = IncidentDetailResponseSchema.safeParse({
+      ...response,
+      timeline: [timelineEvent, {
+        ...notificationQueuedEvent,
+        details: { ...notificationQueuedEvent.details, deliveryId: secondDeliveryId },
+      }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual([
+        "timeline",
+        1,
+        "details",
+        "deliveryId",
+      ]);
+      expect(result.error.issues[0]?.message).toBe(
+        "notification_queued deliveryId must reference an envelope delivery",
+      );
+    }
+  });
+
+  it("requires notification_queued channelId to match its resolved delivery", () => {
+    const result = IncidentDetailResponseSchema.safeParse({
+      ...response,
+      timeline: [timelineEvent, {
+        ...notificationQueuedEvent,
+        details: { ...notificationQueuedEvent.details, channelId: monitorId },
+      }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual([
+        "timeline",
+        1,
+        "details",
+        "channelId",
+      ]);
+      expect(result.error.issues[0]?.message).toBe(
+        "notification_queued channelId must match delivery channelId",
+      );
+    }
+  });
+
+  it("accepts opened and resolved delivery sources with a matching queued event", () => {
+    const resolvedSourceEvent = {
+      ...timelineEvent,
+      type: "resolved",
+      details: { reason: "recovered" },
+    } as const;
+    for (const sourceEvent of [timelineEvent, resolvedSourceEvent]) {
+      expect(IncidentDetailResponseSchema.safeParse({
+        ...response,
+        timeline: [sourceEvent, {
+          ...notificationQueuedEvent,
+          details: {
+            ...notificationQueuedEvent.details,
+            deliveryId: deliveryId.toUpperCase(),
+            channelId: channelId.toUpperCase(),
+          },
+        }],
+        deliveries: [{ ...delivery, incidentEventId: sourceEvent.id.toUpperCase() }],
+      }).success).toBe(true);
+    }
   });
 });
