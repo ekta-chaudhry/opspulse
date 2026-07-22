@@ -1,4 +1,9 @@
-import type { MonitorKind } from "@opspulse/contracts";
-
-export const isMonitorKind = (value: string): value is MonitorKind =>
-  value === "http" || value === "heartbeat";
+export { isMonitorKind } from "./monitor-kind.js";
+export { evaluateMonitorResult } from "./monitor-state.js";
+export type {
+  MonitorEvaluation,
+  MonitorEvaluationResult,
+  MonitorEvaluationSnapshot,
+  MonitorNextSnapshot,
+  MonitorTransition,
+} from "./monitor-state.js";

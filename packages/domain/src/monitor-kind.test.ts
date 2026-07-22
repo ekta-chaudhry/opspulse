@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { isMonitorKind } from "./index.js";
+import { isMonitorKind } from "./monitor-kind.js";
 
 it.each<[string, boolean]>([
   ["http", true],
