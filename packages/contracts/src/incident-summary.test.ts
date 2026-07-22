@@ -22,7 +22,11 @@ describe("incident summary contract", () => {
     expect(IncidentSummarySchema.safeParse({ ...validIncident, status: "resolved" }).success).toBe(
       false,
     );
-    const { status: _status, ...withoutStatus } = validIncident;
+    const withoutStatus = {
+      id: validIncident.id,
+      startedAt: validIncident.startedAt,
+      latestCause: validIncident.latestCause,
+    };
     expect(IncidentSummarySchema.safeParse(withoutStatus).success).toBe(false);
   });
 

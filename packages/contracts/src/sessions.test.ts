@@ -63,9 +63,37 @@ describe("session contracts", () => {
   });
 
   it("requires every owner session timestamp without defaults", () => {
-    for (const key of ["createdAt", "lastSeenAt", "idleExpiresAt", "absoluteExpiresAt"] as const) {
-      const missingTimestamp = { ...session };
-      delete missingTimestamp[key];
+    const sessionsMissingTimestamp = [
+      {
+        id: session.id,
+        lastSeenAt: session.lastSeenAt,
+        idleExpiresAt: session.idleExpiresAt,
+        absoluteExpiresAt: session.absoluteExpiresAt,
+        client: session.client,
+      },
+      {
+        id: session.id,
+        createdAt: session.createdAt,
+        idleExpiresAt: session.idleExpiresAt,
+        absoluteExpiresAt: session.absoluteExpiresAt,
+        client: session.client,
+      },
+      {
+        id: session.id,
+        createdAt: session.createdAt,
+        lastSeenAt: session.lastSeenAt,
+        absoluteExpiresAt: session.absoluteExpiresAt,
+        client: session.client,
+      },
+      {
+        id: session.id,
+        createdAt: session.createdAt,
+        lastSeenAt: session.lastSeenAt,
+        idleExpiresAt: session.idleExpiresAt,
+        client: session.client,
+      },
+    ];
+    for (const missingTimestamp of sessionsMissingTimestamp) {
       expect(OwnerSessionSchema.safeParse(missingTimestamp).success).toBe(false);
     }
     expect(OwnerSessionSchema.safeParse({ ...session, lastSeenAt: "2026-07-22T12:34:56" }).success).toBe(

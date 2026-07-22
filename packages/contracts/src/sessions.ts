@@ -1,7 +1,7 @@
 import { IdSchema, TimestampSchema } from "./common.js";
 import { z } from "./zod.js";
 
-const EmailSchema = z.string().trim().toLowerCase().max(254).email();
+const EmailSchema = z.string().trim().toLowerCase().max(254).pipe(z.email());
 const CsrfTokenSchema = z.string().min(43).max(128).regex(/^[A-Za-z0-9_-]+$/);
 
 export const OwnerSchema = z.strictObject({

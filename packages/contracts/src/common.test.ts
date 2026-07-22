@@ -78,6 +78,17 @@ describe("common contracts", () => {
   it("rejects malformed, empty, and overlong outbound URLs", () => {
     expect(OutboundHttpUrlSchema.safeParse("").success).toBe(false);
     expect(OutboundHttpUrlSchema.safeParse("https:///missing-host").success).toBe(false);
+    for (const url of [
+      "https://example.com/\tpath",
+      "https://example.com/\npath",
+      "https://example.com/\rpath",
+      "https://example.com/\u0001path",
+      "https://example.com/path with space",
+      "https://example.com/\u007fpath",
+      "https://example.com\n.evil.com/path",
+    ]) {
+      expect(OutboundHttpUrlSchema.safeParse(url).success).toBe(false);
+    }
     expect(
       OutboundHttpUrlSchema.safeParse("https://[1:2:3:4:5:6:7:8:9]/health").success,
     ).toBe(false);

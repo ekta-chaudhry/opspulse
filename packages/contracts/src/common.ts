@@ -17,10 +17,22 @@ function hasNoAuthorityUserinfo(value: string): boolean {
   return authority !== undefined && !authority.includes("@");
 }
 
+function hasNoRawAsciiControlOrWhitespace(value: string): boolean {
+  for (const character of value) {
+    const codePoint = character.charCodeAt(0);
+    if (codePoint <= 0x20 || codePoint === 0x7f) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export const OutboundHttpUrlSchema = z
-  .url({ protocol: /^https?$/i })
+  .string()
   .min(1)
   .max(2048)
+  .refine(hasNoRawAsciiControlOrWhitespace)
+  .pipe(z.url({ protocol: /^https?$/i }))
   .refine(hasNoAuthorityUserinfo);
 export type OutboundHttpUrl = z.infer<typeof OutboundHttpUrlSchema>;
 
