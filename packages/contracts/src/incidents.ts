@@ -5,6 +5,7 @@ import {
   TimestampSchema,
 } from "./common.js";
 import { FailureCauseSchema } from "./failure-causes.js";
+import { isTimestampAtOrAfter } from "./timestamp-order.js";
 import { z } from "./zod.js";
 
 export const IncidentStatusSchema = z.enum(["open", "resolved"]);
@@ -36,7 +37,7 @@ const ResolvedIncidentSchema = z
     resolvedAt: TimestampSchema,
     resolutionReason: ResolutionReasonSchema,
   })
-  .refine(({ startedAt, resolvedAt }) => Date.parse(resolvedAt) >= Date.parse(startedAt), {
+  .refine(({ startedAt, resolvedAt }) => isTimestampAtOrAfter(resolvedAt, startedAt), {
     path: ["resolvedAt"],
     message: "resolvedAt must be greater than or equal to startedAt",
   });
@@ -53,7 +54,7 @@ export const IncidentListQuerySchema = CursorQuerySchema.extend({
   from: TimestampSchema.optional(),
   to: TimestampSchema.optional(),
 }).refine(
-  ({ from, to }) => from === undefined || to === undefined || Date.parse(from) <= Date.parse(to),
+  ({ from, to }) => from === undefined || to === undefined || isTimestampAtOrAfter(to, from),
   {
     path: ["to"],
     message: "to must be greater than or equal to from",

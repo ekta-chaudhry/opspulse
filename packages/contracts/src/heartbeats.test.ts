@@ -76,6 +76,34 @@ describe("heartbeat headers", () => {
     });
   });
 
+  it("rejects every embedded ASCII C0 control and DEL after trimming", () => {
+    const controlCodePoints = [
+      ...Array.from({ length: 32 }, (_, codePoint) => codePoint),
+      0x7f,
+    ];
+    for (const codePoint of controlCodePoints) {
+      expect(HeartbeatHeadersSchema.safeParse({
+        "idempotency-key": `prefix${String.fromCharCode(codePoint)}suffix`,
+      }).success).toBe(false);
+    }
+  });
+
+  it("rejects embedded CR, LF, NUL, and tab", () => {
+    for (const control of ["\r", "\n", "\0", "\t"]) {
+      expect(HeartbeatHeadersSchema.safeParse({
+        "idempotency-key": `prefix${control}suffix`,
+      }).success).toBe(false);
+    }
+  });
+
+  it("accepts printable characters adjacent to the rejected ASCII ranges", () => {
+    for (const key of ["prefix suffix", "prefix~suffix"]) {
+      expect(HeartbeatHeadersSchema.parse({ "idempotency-key": key })).toEqual({
+        "idempotency-key": key,
+      });
+    }
+  });
+
   it("rejects case variants and unknown header keys", () => {
     expect(HeartbeatHeadersSchema.safeParse({ "Idempotency-Key": "request-123" }).success).toBe(
       false,

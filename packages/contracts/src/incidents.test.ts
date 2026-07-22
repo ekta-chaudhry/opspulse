@@ -106,6 +106,24 @@ describe("incident contracts", () => {
     }
   });
 
+  it("orders incident resolution timestamps beyond milliseconds and across offsets", () => {
+    expect(IncidentSchema.safeParse({
+      ...resolvedIncident,
+      startedAt: "2026-07-22T12:00:00.0001Z",
+      resolvedAt: "2026-07-22T12:00:00.0009Z",
+    }).success).toBe(true);
+    expect(IncidentSchema.safeParse({
+      ...resolvedIncident,
+      startedAt: "2026-07-22T12:00:00.0009Z",
+      resolvedAt: "2026-07-22T12:00:00.0001Z",
+    }).success).toBe(false);
+    expect(IncidentSchema.safeParse({
+      ...resolvedIncident,
+      startedAt: "2026-07-22T13:00:00.0001+01:00",
+      resolvedAt: "2026-07-22T12:00:00.0001Z",
+    }).success).toBe(true);
+  });
+
   it("rejects malformed opening and latest causes at useful nested paths", () => {
     const openingResult = IncidentSchema.safeParse({
       ...openIncident,
@@ -160,6 +178,21 @@ describe("incident list contracts", () => {
       expect(result.error.issues[0]?.path).toEqual(["to"]);
       expect(result.error.issues[0]?.message).toBe("to must be greater than or equal to from");
     }
+  });
+
+  it("orders incident query ranges beyond milliseconds and across offsets", () => {
+    expect(IncidentListQuerySchema.safeParse({
+      from: "2026-07-22T12:00:00.0001Z",
+      to: "2026-07-22T12:00:00.0009Z",
+    }).success).toBe(true);
+    expect(IncidentListQuerySchema.safeParse({
+      from: "2026-07-22T12:00:00.0009Z",
+      to: "2026-07-22T12:00:00.0001Z",
+    }).success).toBe(false);
+    expect(IncidentListQuerySchema.safeParse({
+      from: "2026-07-22T13:00:00.0001+01:00",
+      to: "2026-07-22T12:00:00.0001Z",
+    }).success).toBe(true);
   });
 
   it("validates an exact paginated incident response", () => {

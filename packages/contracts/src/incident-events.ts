@@ -21,10 +21,21 @@ export const NotificationQueuedDetailsSchema = z.strictObject({
 });
 export type NotificationQueuedDetails = z.infer<typeof NotificationQueuedDetailsSchema>;
 
-export const RecoveryObservedDetailsSchema = z.strictObject({
-  consecutiveSuccesses: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-  recoveryThreshold: z.number().int().min(1).max(10),
-});
+export const RecoveryObservedDetailsSchema = z
+  .strictObject({
+    consecutiveSuccesses: z
+      .number()
+      .int()
+      .min(1, { message: "consecutiveSuccesses must be at least 1" })
+      .max(Number.MAX_SAFE_INTEGER),
+    recoveryThreshold: z.number().int().min(1).max(10),
+  })
+  .refine(({ consecutiveSuccesses, recoveryThreshold }) => {
+    return consecutiveSuccesses <= recoveryThreshold;
+  }, {
+    path: ["consecutiveSuccesses"],
+    message: "consecutiveSuccesses must be less than or equal to recoveryThreshold",
+  });
 export type RecoveryObservedDetails = z.infer<typeof RecoveryObservedDetailsSchema>;
 
 export const ResolvedDetailsSchema = z.strictObject({

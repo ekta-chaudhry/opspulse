@@ -171,6 +171,39 @@ describe("incident event rejection cases", () => {
     }
   });
 
+  it("rejects zero consecutive successes with a useful issue", () => {
+    const result = RecoveryObservedDetailsSchema.safeParse({
+      consecutiveSuccesses: 0,
+      recoveryThreshold: 1,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["consecutiveSuccesses"]);
+      expect(result.error.issues[0]?.message).toBe("consecutiveSuccesses must be at least 1");
+    }
+  });
+
+  it("accepts consecutive successes equal to the recovery threshold", () => {
+    expect(RecoveryObservedDetailsSchema.safeParse({
+      consecutiveSuccesses: 2,
+      recoveryThreshold: 2,
+    }).success).toBe(true);
+  });
+
+  it("rejects consecutive successes above the recovery threshold with a useful issue", () => {
+    const result = RecoveryObservedDetailsSchema.safeParse({
+      consecutiveSuccesses: 3,
+      recoveryThreshold: 2,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["consecutiveSuccesses"]);
+      expect(result.error.issues[0]?.message).toBe(
+        "consecutiveSuccesses must be less than or equal to recoveryThreshold",
+      );
+    }
+  });
+
   it("rejects recovery thresholds outside integer 1 through 10", () => {
     for (const recoveryThreshold of [0, 11, 1.5]) {
       expect(IncidentEventSchema.safeParse({

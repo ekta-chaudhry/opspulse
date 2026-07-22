@@ -25,6 +25,13 @@ const timeoutCause = {
   safeSummary: "Request timed out",
 } as const;
 
+const httpStatusCause = {
+  category: "http_status",
+  code: "HTTP_503",
+  httpStatus: 503,
+  safeSummary: "Service unavailable",
+} as const;
+
 const pendingRequest = {
   id: checkId,
   monitorId,
@@ -114,6 +121,24 @@ describe("check request contracts", () => {
     }
   });
 
+  it("orders request terminal timestamps beyond milliseconds and across offsets", () => {
+    expect(CheckRequestSchema.safeParse({
+      ...completedRequest,
+      createdAt: "2026-07-22T12:00:00.0001Z",
+      terminalAt: "2026-07-22T12:00:00.0009Z",
+    }).success).toBe(true);
+    expect(CheckRequestSchema.safeParse({
+      ...completedRequest,
+      createdAt: "2026-07-22T12:00:00.0009Z",
+      terminalAt: "2026-07-22T12:00:00.0001Z",
+    }).success).toBe(false);
+    expect(CheckRequestSchema.safeParse({
+      ...completedRequest,
+      createdAt: "2026-07-22T13:00:00.0001+01:00",
+      terminalAt: "2026-07-22T12:00:00.0001Z",
+    }).success).toBe(true);
+  });
+
   it("requires safe generation and sequence boundaries", () => {
     expect(CheckRequestSchema.safeParse({
       ...pendingRequest,
@@ -164,6 +189,27 @@ describe("check run contracts", () => {
     expect(CheckRunSchema.safeParse({ ...successfulRun, evaluatedAt: "not-a-time" }).success).toBe(
       false,
     );
+  });
+
+  it("requires non-null evaluatedAt to follow completedAt beyond milliseconds", () => {
+    expect(CheckRunSchema.safeParse({
+      ...successfulRun,
+      completedAt: "2026-07-22T12:00:00.0001Z",
+      evaluatedAt: "2026-07-22T12:00:00.0009Z",
+    }).success).toBe(true);
+
+    const result = CheckRunSchema.safeParse({
+      ...successfulRun,
+      completedAt: "2026-07-22T12:00:00.0009Z",
+      evaluatedAt: "2026-07-22T12:00:00.0001Z",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["evaluatedAt"]);
+      expect(result.error.issues[0]?.message).toBe(
+        "evaluatedAt must be greater than or equal to completedAt",
+      );
+    }
   });
 
   it("enforces safe generation, sequence, and latency values", () => {
@@ -218,6 +264,47 @@ describe("check run contracts", () => {
       }
     }
   });
+
+  it("accepts a run HTTP status matching its http_status cause", () => {
+    expect(CheckRunSchema.safeParse({
+      ...successfulRun,
+      result: "failure",
+      httpStatus: 503,
+      cause: httpStatusCause,
+    }).success).toBe(true);
+  });
+
+  it("rejects a run HTTP status that differs from its http_status cause", () => {
+    const result = CheckRunSchema.safeParse({
+      ...successfulRun,
+      result: "failure",
+      httpStatus: 502,
+      cause: httpStatusCause,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["httpStatus"]);
+      expect(result.error.issues[0]?.message).toBe(
+        "httpStatus must match cause.httpStatus for http_status failures",
+      );
+    }
+  });
+
+  it("rejects a null run HTTP status for an http_status cause", () => {
+    const result = CheckRunSchema.safeParse({
+      ...successfulRun,
+      result: "failure",
+      httpStatus: null,
+      cause: httpStatusCause,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["httpStatus"]);
+      expect(result.error.issues[0]?.message).toBe(
+        "httpStatus must match cause.httpStatus for http_status failures",
+      );
+    }
+  });
 });
 
 describe("check history contracts", () => {
@@ -270,6 +357,71 @@ describe("check history contracts", () => {
       expect(CheckHistoryItemSchema.safeParse(item).success).toBe(false);
     }
   });
+
+  it("requires a non-null run check request ID", () => {
+    const result = CompletedCheckHistoryItemSchema.safeParse({
+      request: completedRequest,
+      run: { ...successfulRun, checkRequestId: null },
+      monitoringError: null,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["run", "checkRequestId"]);
+      expect(result.error.issues[0]?.message).toBe("run.checkRequestId must not be null");
+    }
+  });
+
+  it("requires the run check request ID to match the request ID", () => {
+    const result = CompletedCheckHistoryItemSchema.safeParse({
+      request: completedRequest,
+      run: { ...successfulRun, checkRequestId: runId },
+      monitoringError: null,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["run", "checkRequestId"]);
+      expect(result.error.issues[0]?.message).toBe("run.checkRequestId must match request.id");
+    }
+  });
+
+  it("requires the run monitor ID to match the request monitor ID", () => {
+    const result = CompletedCheckHistoryItemSchema.safeParse({
+      request: completedRequest,
+      run: { ...successfulRun, monitorId: runId },
+      monitoringError: null,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["run", "monitorId"]);
+      expect(result.error.issues[0]?.message).toBe("run.monitorId must match request.monitorId");
+    }
+  });
+
+  it("requires the run generation to match the request generation", () => {
+    const result = CompletedCheckHistoryItemSchema.safeParse({
+      request: completedRequest,
+      run: { ...successfulRun, generation: 1 },
+      monitoringError: null,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["run", "generation"]);
+      expect(result.error.issues[0]?.message).toBe("run.generation must match request.generation");
+    }
+  });
+
+  it("requires the run sequence to match the request sequence", () => {
+    const result = CompletedCheckHistoryItemSchema.safeParse({
+      request: completedRequest,
+      run: { ...successfulRun, sequence: 2 },
+      monitoringError: null,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["run", "sequence"]);
+      expect(result.error.issues[0]?.message).toBe("run.sequence must match request.sequence");
+    }
+  });
 });
 
 describe("check list contracts", () => {
@@ -299,6 +451,21 @@ describe("check list contracts", () => {
     }
     expect(CheckListQuerySchema.safeParse({ result: "unknown" }).success).toBe(false);
     expect(CheckListQuerySchema.safeParse({ extra: true }).success).toBe(false);
+  });
+
+  it("orders query ranges beyond milliseconds and across offsets", () => {
+    expect(CheckListQuerySchema.safeParse({
+      from: "2026-07-22T12:00:00.0001Z",
+      to: "2026-07-22T12:00:00.0009Z",
+    }).success).toBe(true);
+    expect(CheckListQuerySchema.safeParse({
+      from: "2026-07-22T12:00:00.0009Z",
+      to: "2026-07-22T12:00:00.0001Z",
+    }).success).toBe(false);
+    expect(CheckListQuerySchema.safeParse({
+      from: "2026-07-22T13:00:00.0001+01:00",
+      to: "2026-07-22T12:00:00.0001Z",
+    }).success).toBe(true);
   });
 
   it("validates an exact paginated history response", () => {

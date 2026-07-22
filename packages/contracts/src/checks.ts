@@ -6,6 +6,7 @@ import {
   TimestampSchema,
 } from "./common.js";
 import { FailureCauseSchema } from "./failure-causes.js";
+import { isTimestampAtOrAfter } from "./timestamp-order.js";
 import { z } from "./zod.js";
 
 export const CheckRequestSourceSchema = z.enum([
@@ -48,7 +49,7 @@ function hasOrderedTerminalTimestamp(request: {
   createdAt: string;
   terminalAt: string;
 }): boolean {
-  return Date.parse(request.terminalAt) >= Date.parse(request.createdAt);
+  return isTimestampAtOrAfter(request.terminalAt, request.createdAt);
 }
 
 const TerminalTimestampRefinement = {
@@ -95,6 +96,16 @@ export const CheckRunSchema = z
     evaluatedAt: TimestampSchema.nullable(),
   })
   .superRefine((run, context) => {
+    if (
+      run.evaluatedAt !== null &&
+      !isTimestampAtOrAfter(run.evaluatedAt, run.completedAt)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["evaluatedAt"],
+        message: "evaluatedAt must be greater than or equal to completedAt",
+      });
+    }
     if (run.result === "success" && run.cause !== null) {
       context.addIssue({
         code: "custom",
@@ -107,6 +118,16 @@ export const CheckRunSchema = z
         code: "custom",
         path: ["cause"],
         message: "cause is required for failed and timed out checks",
+      });
+    }
+    if (
+      run.cause?.category === "http_status" &&
+      run.httpStatus !== run.cause.httpStatus
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["httpStatus"],
+        message: "httpStatus must match cause.httpStatus for http_status failures",
       });
     }
   });
@@ -125,11 +146,48 @@ export const PendingCheckHistoryItemSchema = z.strictObject({
 });
 export type PendingCheckHistoryItem = z.infer<typeof PendingCheckHistoryItemSchema>;
 
-export const CompletedCheckHistoryItemSchema = z.strictObject({
-  request: CompletedCheckRequestSchema,
-  run: CheckRunSchema,
-  monitoringError: z.null(),
-});
+export const CompletedCheckHistoryItemSchema = z
+  .strictObject({
+    request: CompletedCheckRequestSchema,
+    run: CheckRunSchema,
+    monitoringError: z.null(),
+  })
+  .superRefine(({ request, run }, context) => {
+    if (run.checkRequestId === null) {
+      context.addIssue({
+        code: "custom",
+        path: ["run", "checkRequestId"],
+        message: "run.checkRequestId must not be null",
+      });
+    } else if (run.checkRequestId !== request.id) {
+      context.addIssue({
+        code: "custom",
+        path: ["run", "checkRequestId"],
+        message: "run.checkRequestId must match request.id",
+      });
+    }
+    if (run.monitorId !== request.monitorId) {
+      context.addIssue({
+        code: "custom",
+        path: ["run", "monitorId"],
+        message: "run.monitorId must match request.monitorId",
+      });
+    }
+    if (run.generation !== request.generation) {
+      context.addIssue({
+        code: "custom",
+        path: ["run", "generation"],
+        message: "run.generation must match request.generation",
+      });
+    }
+    if (run.sequence !== request.sequence) {
+      context.addIssue({
+        code: "custom",
+        path: ["run", "sequence"],
+        message: "run.sequence must match request.sequence",
+      });
+    }
+  });
 export type CompletedCheckHistoryItem = z.infer<typeof CompletedCheckHistoryItemSchema>;
 
 export const CancelledCheckHistoryItemSchema = z.strictObject({
@@ -151,7 +209,7 @@ export const CheckListQuerySchema = CursorQuerySchema.extend({
   from: TimestampSchema.optional(),
   to: TimestampSchema.optional(),
 }).refine(
-  ({ from, to }) => from === undefined || to === undefined || Date.parse(from) <= Date.parse(to),
+  ({ from, to }) => from === undefined || to === undefined || isTimestampAtOrAfter(to, from),
   {
     path: ["to"],
     message: "to must be greater than or equal to from",
