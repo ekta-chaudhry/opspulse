@@ -148,6 +148,24 @@ describe("check run contracts", () => {
     expect(CheckRunSchema.safeParse({ ...successfulRun, extra: true }).success).toBe(false);
   });
 
+  it("accepts null evaluatedAt for an unevaluated run", () => {
+    expect(CheckRunSchema.safeParse({ ...successfulRun, evaluatedAt: null }).success).toBe(true);
+  });
+
+  it("accepts a valid evaluatedAt timestamp", () => {
+    expect(CheckRunSchema.safeParse(successfulRun).success).toBe(true);
+  });
+
+  it("rejects missing and invalid evaluatedAt values", () => {
+    const runWithoutEvaluatedAt: Record<string, unknown> = { ...successfulRun };
+    delete runWithoutEvaluatedAt.evaluatedAt;
+
+    expect(CheckRunSchema.safeParse(runWithoutEvaluatedAt).success).toBe(false);
+    expect(CheckRunSchema.safeParse({ ...successfulRun, evaluatedAt: "not-a-time" }).success).toBe(
+      false,
+    );
+  });
+
   it("enforces safe generation, sequence, and latency values", () => {
     expect(CheckRunSchema.safeParse({
       ...successfulRun,

@@ -92,7 +92,7 @@ export const CheckRunSchema = z
     cause: FailureCauseSchema.nullable(),
     completedAt: TimestampSchema,
     createdAt: TimestampSchema,
-    evaluatedAt: TimestampSchema,
+    evaluatedAt: TimestampSchema.nullable(),
   })
   .superRefine((run, context) => {
     if (run.result === "success" && run.cause !== null) {
