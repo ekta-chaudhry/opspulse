@@ -107,6 +107,72 @@ export type {
 } from "./incidents.js";
 
 export {
+  ChannelLifecycleSchema,
+  ChannelListQuerySchema,
+  ChannelListResponseSchema,
+  ChannelResponseSchema,
+  CreateNotificationChannelSchema,
+  NotificationChannelSchema,
+  TestChannelResponseSchema,
+  UpdateNotificationChannelSchema,
+} from "./notification-channels.js";
+export type {
+  ChannelLifecycle,
+  ChannelListQuery,
+  ChannelListResponse,
+  ChannelResponse,
+  CreateNotificationChannel,
+  NotificationChannel,
+  TestChannelResponse,
+  UpdateNotificationChannel,
+} from "./notification-channels.js";
+
+export {
+  AttemptOutcomeSchema,
+  DeliveredDeliverySchema,
+  DeliveryListQuerySchema,
+  DeliveryListResponseSchema,
+  DeliveryStatusSchema,
+  FailedDeliverySchema,
+  NotificationAttemptSchema,
+  NotificationDeliverySchema,
+  QueuedDeliverySchema,
+  ReplayDeliverySchema,
+  RetryingDeliverySchema,
+} from "./notification-deliveries.js";
+export type {
+  AttemptOutcome,
+  DeliveredDelivery,
+  DeliveryListQuery,
+  DeliveryListResponse,
+  DeliveryStatus,
+  FailedDelivery,
+  NotificationAttempt,
+  NotificationDelivery,
+  QueuedDelivery,
+  ReplayDelivery,
+  RetryingDelivery,
+} from "./notification-deliveries.js";
+
+export {
+  OpenedWebhookSchema,
+  OpsPulseWebhookV1Schema,
+  ResolvedWebhookSchema,
+  WEBHOOK_HEADER_NAMES,
+  WEBHOOK_PAYLOAD_VERSION,
+  WebhookEventTypeSchema,
+} from "./webhook.js";
+export type {
+  OpenedWebhook,
+  OpsPulseWebhookV1,
+  ResolvedWebhook,
+  WebhookEventType,
+} from "./webhook.js";
+
+export { IncidentDetailResponseSchema } from "./incident-detail.js";
+export type { IncidentDetailResponse } from "./incident-detail.js";
+
+export {
   FailureObservedDetailsSchema,
   FailureObservedIncidentEventSchema,
   IncidentEventSchema,
