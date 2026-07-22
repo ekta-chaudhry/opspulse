@@ -12,8 +12,8 @@ import {
   MAX_PAGE_SIZE,
   MonitorIdParamsSchema,
   OutboundHttpUrlSchema,
-  PublicMonitorSlugParamsSchema,
   PublicMonitorSlugSchema,
+  PublicSlugParamsSchema,
   SafeMessageSchema,
   TimestampSchema,
 } from "./common.js";
@@ -61,6 +61,8 @@ describe("common contracts", () => {
   it("accepts HTTP and HTTPS outbound URLs", () => {
     expect(OutboundHttpUrlSchema.safeParse("http://example.com/path?q=1").success).toBe(true);
     expect(OutboundHttpUrlSchema.safeParse("https://127.0.0.1:8443/health").success).toBe(true);
+    expect(OutboundHttpUrlSchema.safeParse("https://example.com./health").success).toBe(true);
+    expect(OutboundHttpUrlSchema.safeParse("https://münich.example/health").success).toBe(true);
   });
 
   it("rejects non-HTTP outbound URL schemes", () => {
@@ -116,6 +118,9 @@ describe("common contracts", () => {
       cursor: "next",
       limit: 42,
     });
+    expect(CursorQuerySchema.parse({ limit: "1.0" })).toEqual({ limit: 1 });
+    expect(CursorQuerySchema.parse({ limit: " 1 " })).toEqual({ limit: 1 });
+    expect(CursorQuerySchema.parse({ limit: "1e2" })).toEqual({ limit: 100 });
   });
 
   it("rejects cursor limits below the minimum", () => {
@@ -137,7 +142,11 @@ describe("common contracts", () => {
 
   it("rejects non-integer cursor limits and unknown query keys", () => {
     expect(CursorQuerySchema.safeParse({ limit: "1.5" }).success).toBe(false);
+    expect(CursorQuerySchema.safeParse({ limit: 1.5 }).success).toBe(false);
     expect(CursorQuerySchema.safeParse({ limit: "abc" }).success).toBe(false);
+    expect(CursorQuerySchema.safeParse({ limit: Number.NaN }).success).toBe(false);
+    expect(CursorQuerySchema.safeParse({ limit: true }).success).toBe(false);
+    expect(CursorQuerySchema.safeParse({ limit: null }).success).toBe(false);
     expect(CursorQuerySchema.safeParse({ extra: true }).success).toBe(false);
   });
 
@@ -163,9 +172,9 @@ describe("common contracts", () => {
       expect(schema.safeParse({ [key]: uuid, extra: "rejected" }).success).toBe(false);
       expect(schema.safeParse({ [key]: "invalid" }).success).toBe(false);
     }
-    expect(PublicMonitorSlugParamsSchema.safeParse({ slug: "api-prod" }).success).toBe(true);
+    expect(PublicSlugParamsSchema.safeParse({ slug: "api-prod" }).success).toBe(true);
     expect(
-      PublicMonitorSlugParamsSchema.safeParse({ slug: "api-prod", extra: "rejected" }).success,
+      PublicSlugParamsSchema.safeParse({ slug: "api-prod", extra: "rejected" }).success,
     ).toBe(false);
   });
 });

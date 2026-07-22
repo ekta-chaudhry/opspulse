@@ -13,8 +13,8 @@ export {
   MAX_PAGE_SIZE,
   MonitorIdParamsSchema,
   OutboundHttpUrlSchema,
-  PublicMonitorSlugParamsSchema,
   PublicMonitorSlugSchema,
+  PublicSlugParamsSchema,
   SafeMessageSchema,
   TimestampSchema,
 } from "./common.js";
@@ -30,7 +30,7 @@ export type {
   MonitorIdParams,
   OutboundHttpUrl,
   PublicMonitorSlug,
-  PublicMonitorSlugParams,
+  PublicSlugParams,
   SafeMessage,
   Timestamp,
 } from "./common.js";
