@@ -117,11 +117,23 @@ const deliveryShape = {
 
 interface DeliveryAttemptCollection {
   id: string;
+  status: DeliveryStatus;
+  replayOfDeliveryId: string | null;
   attemptCount: number;
+  lastResponseStatus: number | null;
+  lastSafeError: string | null;
+  nextAttemptAt: string | null;
+  createdAt: string;
+  updatedAt: string;
   attempts: readonly {
     id: string;
     deliveryId: string;
     attemptNumber: number;
+    startedAt: string;
+    completedAt: string;
+    outcome: AttemptOutcome;
+    responseStatus: number | null;
+    safeError: string | null;
   }[];
 }
 
@@ -132,6 +144,21 @@ interface DeliveryAttemptIssue {
 
 function deliveryAttemptIssues(delivery: DeliveryAttemptCollection): DeliveryAttemptIssue[] {
   const issues: DeliveryAttemptIssue[] = [];
+  if (!isTimestampAtOrAfter(delivery.updatedAt, delivery.createdAt)) {
+    issues.push({
+      path: ["updatedAt"],
+      message: "updatedAt must be greater than or equal to createdAt",
+    });
+  }
+  if (
+    delivery.replayOfDeliveryId !== null &&
+    delivery.replayOfDeliveryId.toLowerCase() === delivery.id.toLowerCase()
+  ) {
+    issues.push({
+      path: ["replayOfDeliveryId"],
+      message: "replayOfDeliveryId must differ from delivery id",
+    });
+  }
   if (delivery.attemptCount !== delivery.attempts.length) {
     issues.push({ path: ["attemptCount"], message: "attemptCount must equal attempts length" });
   }
@@ -139,6 +166,22 @@ function deliveryAttemptIssues(delivery: DeliveryAttemptCollection): DeliveryAtt
   const attemptIds = new Set<string>();
   const attemptNumbers = new Set<number>();
   for (const [index, attempt] of delivery.attempts.entries()) {
+    if (!isTimestampAtOrAfter(attempt.startedAt, delivery.createdAt)) {
+      issues.push({
+        path: ["attempts", index, "startedAt"],
+        message: "attempt startedAt must be greater than or equal to delivery createdAt",
+      });
+    }
+    const previousAttempt = delivery.attempts[index - 1];
+    if (
+      previousAttempt !== undefined &&
+      !isTimestampAtOrAfter(attempt.startedAt, previousAttempt.completedAt)
+    ) {
+      issues.push({
+        path: ["attempts", index, "startedAt"],
+        message: "attempt startedAt must be greater than or equal to previous completedAt",
+      });
+    }
     if (attempt.deliveryId.toLowerCase() !== delivery.id.toLowerCase()) {
       issues.push({
         path: ["attempts", index, "deliveryId"],
@@ -163,12 +206,88 @@ function deliveryAttemptIssues(delivery: DeliveryAttemptCollection): DeliveryAtt
     }
     attemptNumbers.add(attempt.attemptNumber);
 
-    const previousAttempt = delivery.attempts[index - 1];
-    if (previousAttempt !== undefined && attempt.attemptNumber <= previousAttempt.attemptNumber) {
+    if (attempt.attemptNumber !== index + 1) {
       issues.push({
         path: ["attempts", index, "attemptNumber"],
-        message: "attempt numbers must be sorted ascending",
+        message: "attemptNumber must equal its one-based index",
       });
+    }
+  }
+
+  const finalAttempt = delivery.attempts[delivery.attempts.length - 1];
+  if (finalAttempt !== undefined && delivery.status !== "queued") {
+    if (!isTimestampAtOrAfter(delivery.updatedAt, finalAttempt.completedAt)) {
+      issues.push({
+        path: ["updatedAt"],
+        message: "updatedAt must be greater than or equal to final attempt completedAt",
+      });
+    }
+    if (
+      delivery.status === "retrying" &&
+      delivery.nextAttemptAt !== null &&
+      !isTimestampAtOrAfter(delivery.nextAttemptAt, finalAttempt.completedAt)
+    ) {
+      issues.push({
+        path: ["nextAttemptAt"],
+        message: "nextAttemptAt must be greater than or equal to final attempt completedAt",
+      });
+    }
+    if (delivery.lastResponseStatus !== finalAttempt.responseStatus) {
+      issues.push({
+        path: ["lastResponseStatus"],
+        message: "lastResponseStatus must equal final attempt responseStatus",
+      });
+    }
+    if (delivery.lastSafeError !== finalAttempt.safeError) {
+      issues.push({
+        path: ["lastSafeError"],
+        message: "lastSafeError must equal final attempt safeError",
+      });
+    }
+  }
+
+  if (delivery.status === "retrying") {
+    for (const [index, attempt] of delivery.attempts.entries()) {
+      if (attempt.outcome !== "retryable_failure") {
+        issues.push({
+          path: ["attempts", index, "outcome"],
+          message: "retrying attempts must be retryable_failure",
+        });
+      }
+    }
+  }
+
+  if (delivery.status === "delivered") {
+    for (const [index, attempt] of delivery.attempts.entries()) {
+      const expectedOutcome = index === delivery.attempts.length - 1
+        ? "delivered"
+        : "retryable_failure";
+      if (attempt.outcome !== expectedOutcome) {
+        issues.push({
+          path: ["attempts", index, "outcome"],
+          message: index === delivery.attempts.length - 1
+            ? "final delivered attempt must have delivered outcome"
+            : "attempts before delivery must be retryable_failure",
+        });
+      }
+    }
+  }
+
+  if (delivery.status === "failed") {
+    for (const [index, attempt] of delivery.attempts.entries()) {
+      const isFinalAttempt = index === delivery.attempts.length - 1;
+      const hasValidOutcome = isFinalAttempt
+        ? attempt.outcome === "final_failure" ||
+          (attempt.outcome === "retryable_failure" && delivery.attemptCount === 6)
+        : attempt.outcome === "retryable_failure";
+      if (!hasValidOutcome) {
+        issues.push({
+          path: ["attempts", index, "outcome"],
+          message: isFinalAttempt
+            ? "final failed attempt must be final_failure or an exhausted retryable_failure"
+            : "attempts before final failure must be retryable_failure",
+        });
+      }
     }
   }
   return issues;

@@ -23,6 +23,7 @@ const attemptId = "2bd75d4f-a17b-4b4c-9f96-6c9d8fd786aa";
 const secondAttemptId = "5f5502a0-38ef-4aad-9f9a-d9311716da2e";
 const startedAt = "2026-07-22T12:00:00.0001Z";
 const completedAt = "2026-07-22T12:00:00.0009Z";
+const secondCompletedAt = "2026-07-22T12:00:00.0010Z";
 const nextAttemptAt = "2026-07-22T12:05:00Z";
 
 const deliveredAttempt = {
@@ -234,10 +235,8 @@ describe("notification delivery branches", () => {
     const statuses = ["queued", "retrying", "delivered", "failed"] as const;
     for (const sample of samples) {
       for (const status of statuses) {
-        const deliveredFieldsAlsoMeetFailedRules =
-          sample.status === "delivered" && status === "failed";
         expect(NotificationDeliverySchema.safeParse({ ...sample, status }).success).toBe(
-          status === sample.status || deliveredFieldsAlsoMeetFailedRules,
+          status === sample.status,
         );
       }
     }
@@ -301,10 +300,13 @@ describe("notification delivery branches", () => {
       ...retryableAttempt,
       id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
       attemptNumber: index + 1,
+      completedAt: startedAt,
     }));
     expect(FailedDeliverySchema.safeParse({
       ...failedDelivery,
       attemptCount: 6,
+      lastResponseStatus: 503,
+      lastSafeError: "Service unavailable",
       attempts,
     }).success).toBe(true);
     expect(FailedDeliverySchema.safeParse({
@@ -326,6 +328,7 @@ describe("notification delivery branches", () => {
       expect(FailedDeliverySchema.safeParse({
         ...failedDelivery,
         lastResponseStatus,
+        attempts: [{ ...finalAttempt, responseStatus: lastResponseStatus }],
       }).success).toBe(true);
     }
     for (const lastResponseStatus of [99, 600, 100.5]) {
@@ -337,6 +340,7 @@ describe("notification delivery branches", () => {
     expect(FailedDeliverySchema.safeParse({
       ...failedDelivery,
       lastSafeError: ` ${"e".repeat(500)} `,
+      attempts: [{ ...finalAttempt, safeError: ` ${"e".repeat(500)} ` }],
     }).success).toBe(true);
     expect(FailedDeliverySchema.safeParse({
       ...failedDelivery,
@@ -376,26 +380,30 @@ describe("delivery attempt collection invariants", () => {
     ...deliveredAttempt,
     id: secondAttemptId,
     attemptNumber: 2,
+    startedAt: completedAt,
+    completedAt: secondCompletedAt,
   } as const;
   const twoAttemptDelivery = {
     ...deliveredDelivery,
     attemptCount: 2,
-    attempts: [deliveredAttempt, secondAttempt],
+    attempts: [retryableAttempt, secondAttempt],
+    updatedAt: secondCompletedAt,
   } as const;
 
-  it("accepts sorted, uniquely identified, owned attempts with a matching count", () => {
+  it("accepts contiguous, uniquely identified, owned attempts with a matching count", () => {
     expect(DeliveredDeliverySchema.safeParse(twoAttemptDelivery).success).toBe(true);
   });
 
-  it("rejects attempts outside ascending attempt-number order with a useful path", () => {
+  it("requires every attempt number to equal its one-based index", () => {
     const result = DeliveredDeliverySchema.safeParse({
       ...twoAttemptDelivery,
-      attempts: [secondAttempt, deliveredAttempt],
+      attempts: [retryableAttempt, { ...secondAttempt, attemptNumber: 3 }],
     });
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues.some((issue) =>
-        issue.path.join(".") === "attempts.1.attemptNumber" && issue.message.includes("ascending")
+        issue.path.join(".") === "attempts.1.attemptNumber" &&
+          issue.message === "attemptNumber must equal its one-based index"
       )).toBe(true);
     }
   });
@@ -460,6 +468,235 @@ describe("delivery attempt collection invariants", () => {
     >();
     const parsed = NotificationDeliverySchema.parse(deliveredDelivery);
     expect(Object.isFrozen(parsed.attempts)).toBe(true);
+  });
+
+  it("requires every retrying attempt to be retryable_failure", () => {
+    for (const attempt of [deliveredAttempt, finalAttempt]) {
+      const result = RetryingDeliverySchema.safeParse({
+        ...retryingDelivery,
+        lastResponseStatus: attempt.responseStatus,
+        lastSafeError: attempt.safeError,
+        attempts: [attempt],
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((issue) =>
+          issue.path.join(".") === "attempts.0.outcome" &&
+            issue.message === "retrying attempts must be retryable_failure"
+        )).toBe(true);
+      }
+    }
+  });
+
+  it("requires delivered histories to end once with delivered after only retryable failures", () => {
+    expect(DeliveredDeliverySchema.safeParse(twoAttemptDelivery).success).toBe(true);
+    for (const attempts of [
+      [deliveredAttempt, secondAttempt],
+      [finalAttempt, secondAttempt],
+      [retryableAttempt, { ...secondAttempt, outcome: "retryable_failure", responseStatus: 503,
+        safeError: "Service unavailable" }],
+      [retryableAttempt, { ...secondAttempt, outcome: "final_failure", responseStatus: 500,
+        safeError: "Rejected" }],
+    ]) {
+      const final = attempts[attempts.length - 1];
+      expect(DeliveredDeliverySchema.safeParse({
+        ...twoAttemptDelivery,
+        lastResponseStatus: final?.responseStatus,
+        lastSafeError: final?.safeError,
+        attempts,
+      }).success).toBe(false);
+    }
+  });
+
+  it("allows failed histories to end in final_failure or exhaust six retryable failures", () => {
+    const secondFinalAttempt = {
+      ...finalAttempt,
+      id: secondAttemptId,
+      attemptNumber: 2,
+      startedAt: completedAt,
+      completedAt: secondCompletedAt,
+    } as const;
+    expect(FailedDeliverySchema.safeParse({
+      ...failedDelivery,
+      attemptCount: 2,
+      attempts: [retryableAttempt, secondFinalAttempt],
+      updatedAt: secondCompletedAt,
+    }).success).toBe(true);
+
+    const exhaustedAttempts = Array.from({ length: 6 }, (_, index) => ({
+      ...retryableAttempt,
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      attemptNumber: index + 1,
+      completedAt: startedAt,
+    }));
+    expect(FailedDeliverySchema.safeParse({
+      ...failedDelivery,
+      attemptCount: 6,
+      lastResponseStatus: 503,
+      lastSafeError: "Service unavailable",
+      attempts: exhaustedAttempts,
+    }).success).toBe(true);
+  });
+
+  it("rejects delivered outcomes and invalid terminal failure placement in failed histories", () => {
+    const secondRetryableAttempt = {
+      ...retryableAttempt,
+      id: secondAttemptId,
+      attemptNumber: 2,
+      startedAt: completedAt,
+      completedAt: secondCompletedAt,
+    } as const;
+    for (const value of [
+      { ...failedDelivery, lastResponseStatus: 204, lastSafeError: null,
+        attempts: [deliveredAttempt] },
+      { ...failedDelivery, lastResponseStatus: 503, lastSafeError: "Service unavailable",
+        attempts: [retryableAttempt] },
+      { ...failedDelivery, attemptCount: 2, lastResponseStatus: 503,
+        lastSafeError: "Service unavailable", attempts: [finalAttempt, secondRetryableAttempt] },
+    ]) {
+      expect(FailedDeliverySchema.safeParse(value).success).toBe(false);
+    }
+  });
+
+  it("requires delivery last response fields to exactly match the final attempt", () => {
+    for (const [schema, value] of [
+      [RetryingDeliverySchema, retryingDelivery],
+      [DeliveredDeliverySchema, deliveredDelivery],
+      [FailedDeliverySchema, failedDelivery],
+    ] as const) {
+      const changes = [
+        { lastResponseStatus: 500 },
+        ...(value.status === "delivered" ? [] : [{ lastSafeError: "Mismatch" }]),
+      ];
+      for (const change of changes) {
+        const result = schema.safeParse({ ...value, ...change });
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.issues.some((issue) =>
+            issue.message.includes("must equal final attempt")
+          )).toBe(true);
+        }
+      }
+    }
+  });
+});
+
+describe("delivery temporal and replay integrity", () => {
+  it("requires updatedAt at or after createdAt for every status", () => {
+    for (const value of [queuedDelivery, retryingDelivery, deliveredDelivery, failedDelivery]) {
+      const result = NotificationDeliverySchema.safeParse({
+        ...value,
+        createdAt: completedAt,
+        updatedAt: startedAt,
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((issue) =>
+          issue.path.join(".") === "updatedAt" &&
+            issue.message === "updatedAt must be greater than or equal to createdAt"
+        )).toBe(true);
+      }
+    }
+  });
+
+  it("requires each attempt to start at or after delivery creation", () => {
+    const result = DeliveredDeliverySchema.safeParse({
+      ...deliveredDelivery,
+      createdAt: completedAt,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) =>
+        issue.path.join(".") === "attempts.0.startedAt" &&
+          issue.message === "attempt startedAt must be greater than or equal to delivery createdAt"
+      )).toBe(true);
+    }
+  });
+
+  it("requires each later attempt to start at or after the previous completion", () => {
+    const firstAttempt = { ...retryableAttempt, completedAt } as const;
+    const finalAttemptWithOverlap = {
+      ...deliveredAttempt,
+      id: secondAttemptId,
+      attemptNumber: 2,
+      startedAt,
+      completedAt,
+    } as const;
+    const result = DeliveredDeliverySchema.safeParse({
+      ...deliveredDelivery,
+      attemptCount: 2,
+      attempts: [firstAttempt, finalAttemptWithOverlap],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) =>
+        issue.path.join(".") === "attempts.1.startedAt" &&
+          issue.message === "attempt startedAt must be greater than or equal to previous completedAt"
+      )).toBe(true);
+    }
+  });
+
+  it("requires updatedAt at or after the final attempt completion", () => {
+    const result = DeliveredDeliverySchema.safeParse({
+      ...deliveredDelivery,
+      updatedAt: "2026-07-22T12:00:00.0005Z",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) =>
+        issue.path.join(".") === "updatedAt" &&
+          issue.message === "updatedAt must be greater than or equal to final attempt completedAt"
+      )).toBe(true);
+    }
+  });
+
+  it("requires retry scheduling at or after the final attempt completion", () => {
+    const result = RetryingDeliverySchema.safeParse({
+      ...retryingDelivery,
+      nextAttemptAt: "2026-07-22T12:00:00.0005Z",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) =>
+        issue.path.join(".") === "nextAttemptAt" &&
+          issue.message === "nextAttemptAt must be greater than or equal to final attempt completedAt"
+      )).toBe(true);
+    }
+  });
+
+  it("rejects a replay that points to the same delivery UUID in any case", () => {
+    const result = QueuedDeliverySchema.safeParse({
+      ...queuedDelivery,
+      replayOfDeliveryId: deliveryId.toUpperCase(),
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) =>
+        issue.path.join(".") === "replayOfDeliveryId" &&
+          issue.message === "replayOfDeliveryId must differ from delivery id"
+      )).toBe(true);
+    }
+  });
+
+  it("compares arbitrary fractional precision and offset-equivalent timestamps", () => {
+    expect(DeliveredDeliverySchema.safeParse({
+      ...deliveredDelivery,
+      createdAt: "2026-07-22T13:00:00.0001+01:00",
+      attempts: [{
+        ...deliveredAttempt,
+        startedAt: "2026-07-22T12:00:00.0001Z",
+        completedAt: "2026-07-22T12:00:00.0001001Z",
+      }],
+      updatedAt: "2026-07-22T13:00:00.0001001+01:00",
+    }).success).toBe(true);
+    expect(DeliveredDeliverySchema.safeParse({
+      ...deliveredDelivery,
+      attempts: [{
+        ...deliveredAttempt,
+        completedAt: "2026-07-22T12:00:00.0001001Z",
+      }],
+      updatedAt: "2026-07-22T12:00:00.0001000Z",
+    }).success).toBe(false);
   });
 });
 

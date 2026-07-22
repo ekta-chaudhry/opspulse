@@ -2,9 +2,11 @@ import {
   CursorPageInfoSchema,
   CursorQuerySchema,
   IdSchema,
+  MAX_PAGE_SIZE,
   OutboundHttpUrlSchema,
   TimestampSchema,
 } from "./common.js";
+import { isTimestampAtOrAfter } from "./timestamp-order.js";
 import { z } from "./zod.js";
 
 export const ChannelLifecycleSchema = z.enum(["active", "archived"]);
@@ -33,16 +35,21 @@ export const UpdateNotificationChannelSchema = z
   });
 export type UpdateNotificationChannel = z.infer<typeof UpdateNotificationChannelSchema>;
 
-export const NotificationChannelSchema = z.strictObject({
-  id: IdSchema,
-  name: ChannelNameSchema,
-  enabled: z.boolean(),
-  lifecycle: ChannelLifecycleSchema,
-  destinationConfigured: z.literal(true),
-  hasSigningSecret: z.literal(true),
-  createdAt: TimestampSchema,
-  updatedAt: TimestampSchema,
-});
+export const NotificationChannelSchema = z
+  .strictObject({
+    id: IdSchema,
+    name: ChannelNameSchema,
+    enabled: z.boolean(),
+    lifecycle: ChannelLifecycleSchema,
+    destinationConfigured: z.literal(true),
+    hasSigningSecret: z.literal(true),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .refine(({ createdAt, updatedAt }) => isTimestampAtOrAfter(updatedAt, createdAt), {
+    path: ["updatedAt"],
+    message: "updatedAt must be greater than or equal to createdAt",
+  });
 export type NotificationChannel = z.infer<typeof NotificationChannelSchema>;
 
 export const ChannelResponseSchema = z.strictObject({
@@ -56,7 +63,7 @@ export const ChannelListQuerySchema = CursorQuerySchema.extend({
 export type ChannelListQuery = z.infer<typeof ChannelListQuerySchema>;
 
 export const ChannelListResponseSchema = z.strictObject({
-  items: z.array(NotificationChannelSchema),
+  items: z.array(NotificationChannelSchema).max(MAX_PAGE_SIZE),
   page: CursorPageInfoSchema,
 });
 export type ChannelListResponse = z.infer<typeof ChannelListResponseSchema>;

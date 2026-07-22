@@ -68,13 +68,23 @@ const webhookShape = {
   occurredAt: TimestampSchema,
 };
 
-export const OpenedWebhookSchema = z.strictObject({
-  ...webhookShape,
-  eventType: z.literal("incident.opened"),
-  monitor: OpenedWebhookMonitorSchema,
-  incident: OpenedWebhookIncidentSchema,
-  summary: OpenedWebhookSummarySchema,
-});
+export const OpenedWebhookSchema = z
+  .strictObject({
+    ...webhookShape,
+    eventType: z.literal("incident.opened"),
+    monitor: OpenedWebhookMonitorSchema,
+    incident: OpenedWebhookIncidentSchema,
+    summary: OpenedWebhookSummarySchema,
+  })
+  .refine(
+    ({ occurredAt, incident }) =>
+      isTimestampAtOrAfter(occurredAt, incident.startedAt) &&
+      isTimestampAtOrAfter(incident.startedAt, occurredAt),
+    {
+      path: ["occurredAt"],
+      message: "opened occurredAt must represent the same instant as incident startedAt",
+    },
+  );
 export type OpenedWebhook = z.infer<typeof OpenedWebhookSchema>;
 
 export const ResolvedWebhookSchema = z
@@ -90,6 +100,13 @@ export const ResolvedWebhookSchema = z
     {
       path: ["monitor", "state"],
       message: "recovered incidents require an up monitor",
+    },
+  )
+  .refine(
+    ({ occurredAt, incident }) => isTimestampAtOrAfter(occurredAt, incident.resolvedAt),
+    {
+      path: ["occurredAt"],
+      message: "occurredAt must be greater than or equal to incident resolvedAt",
     },
   );
 export type ResolvedWebhook = z.infer<typeof ResolvedWebhookSchema>;

@@ -41,6 +41,7 @@ const openedWebhook = {
 } as const;
 const recoveredWebhook = {
   ...baseWebhook,
+  occurredAt: resolvedAt,
   eventType: "incident.resolved",
   monitor: { ...monitor, state: "up" },
   incident: { id: incidentId, startedAt, resolvedAt },
@@ -52,6 +53,7 @@ const recoveredWebhook = {
 } as const;
 const archivedWebhook = {
   ...baseWebhook,
+  occurredAt: resolvedAt,
   eventType: "incident.resolved",
   incident: { id: incidentId, startedAt, resolvedAt },
   summary: {
@@ -134,6 +136,30 @@ describe("opened webhooks", () => {
       expect(OpenedWebhookSchema.safeParse(value).success).toBe(false);
     }
   });
+
+  it("requires occurredAt and startedAt to represent the same instant", () => {
+    expect(OpenedWebhookSchema.safeParse({
+      ...openedWebhook,
+      occurredAt: "2026-07-22T13:00:00.0001000+01:00",
+      incident: {
+        ...openedWebhook.incident,
+        startedAt: "2026-07-22T12:00:00.0001Z",
+      },
+    }).success).toBe(true);
+    for (const occurredAt of [
+      "2026-07-22T12:00:00.00009Z",
+      "2026-07-22T12:00:00.00011Z",
+    ]) {
+      const result = OpenedWebhookSchema.safeParse({ ...openedWebhook, occurredAt });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.path).toEqual(["occurredAt"]);
+        expect(result.error.issues[0]?.message).toBe(
+          "opened occurredAt must represent the same instant as incident startedAt",
+        );
+      }
+    }
+  });
 });
 
 describe("resolved webhooks", () => {
@@ -190,6 +216,24 @@ describe("resolved webhooks", () => {
         resolvedAt: "2026-07-22T12:00:00.0001Z",
       },
     }).success).toBe(true);
+  });
+
+  it("requires resolved occurrence at or after incident resolution", () => {
+    expect(ResolvedWebhookSchema.safeParse({
+      ...recoveredWebhook,
+      occurredAt: "2026-07-22T13:00:00.0009000+01:00",
+    }).success).toBe(true);
+    const result = ResolvedWebhookSchema.safeParse({
+      ...recoveredWebhook,
+      occurredAt: "2026-07-22T12:00:00.00089Z",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["occurredAt"]);
+      expect(result.error.issues[0]?.message).toBe(
+        "occurredAt must be greater than or equal to incident resolvedAt",
+      );
+    }
   });
 });
 

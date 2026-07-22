@@ -176,6 +176,34 @@ describe("notification channel responses", () => {
     expect(ChannelResponseSchema.safeParse({ channel, extra: true }).success).toBe(false);
   });
 
+  it("requires updatedAt at or after createdAt with a useful path", () => {
+    const result = NotificationChannelSchema.safeParse({
+      ...channel,
+      createdAt: "2026-07-22T12:34:56.1234569Z",
+      updatedAt: "2026-07-22T12:34:56.1234561Z",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["updatedAt"]);
+      expect(result.error.issues[0]?.message).toBe(
+        "updatedAt must be greater than or equal to createdAt",
+      );
+    }
+  });
+
+  it("orders channel timestamps across arbitrary precision and equivalent offsets", () => {
+    expect(NotificationChannelSchema.safeParse({
+      ...channel,
+      createdAt: "2026-07-22T13:34:56.1234561+01:00",
+      updatedAt: "2026-07-22T12:34:56.1234561Z",
+    }).success).toBe(true);
+    expect(NotificationChannelSchema.safeParse({
+      ...channel,
+      createdAt: "2026-07-22T12:34:56.1234561Z",
+      updatedAt: "2026-07-22T12:34:56.1234562Z",
+    }).success).toBe(true);
+  });
+
   it("inherits pagination for lifecycle-filtered list queries", () => {
     expect(ChannelListQuerySchema.parse({})).toEqual({ limit: 25 });
     expect(ChannelListQuerySchema.parse({
@@ -203,6 +231,18 @@ describe("notification channel responses", () => {
       deliveryId,
       queuedAt: timestamp,
       status: "queued",
+    }).success).toBe(false);
+  });
+
+  it("limits channel list responses to the shared maximum page size", () => {
+    const page = { nextCursor: null, hasMore: false } as const;
+    expect(ChannelListResponseSchema.safeParse({
+      items: Array.from({ length: 100 }, () => channel),
+      page,
+    }).success).toBe(true);
+    expect(ChannelListResponseSchema.safeParse({
+      items: Array.from({ length: 101 }, () => channel),
+      page,
     }).success).toBe(false);
   });
 });

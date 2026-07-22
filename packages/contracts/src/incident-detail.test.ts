@@ -5,6 +5,7 @@ const incidentId = "550e8400-e29b-41d4-a716-446655440000";
 const monitorId = "018f4f1c-6f4a-4abc-9234-1234567890ab";
 const eventId = "b7d6f4a6-0b1d-4b55-9a34-5072f6116c43";
 const deliveryId = "7263b827-013d-4426-8657-e2ea2bc1f3f1";
+const secondDeliveryId = "5f5502a0-38ef-4aad-9f9a-d9311716da2e";
 const channelId = "2bd75d4f-a17b-4b4c-9f96-6c9d8fd786aa";
 const timestamp = "2026-07-22T12:00:00.0001Z";
 const nextAttemptAt = "2026-07-22T12:05:00Z";
@@ -129,5 +130,76 @@ describe("incident detail response", () => {
       ...response,
       deliveries: [{ ...delivery, attemptCount: 1 }],
     }).success).toBe(false);
+  });
+
+  it("matches every timeline event to the envelope incident case-insensitively", () => {
+    expect(IncidentDetailResponseSchema.safeParse({
+      ...response,
+      incident: { ...incident, id: incidentId.toUpperCase() },
+    }).success).toBe(true);
+    const result = IncidentDetailResponseSchema.safeParse({
+      ...response,
+      timeline: [{ ...timelineEvent, incidentId: monitorId }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["timeline", 0, "incidentId"]);
+      expect(result.error.issues[0]?.message).toBe(
+        "timeline incidentId must match envelope incident id",
+      );
+    }
+  });
+
+  it("requires canonically unique timeline event IDs", () => {
+    const result = IncidentDetailResponseSchema.safeParse({
+      ...response,
+      timeline: [timelineEvent, { ...timelineEvent, id: eventId.toUpperCase() }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["timeline", 1, "id"]);
+      expect(result.error.issues[0]?.message).toBe("timeline event ids must be unique");
+    }
+  });
+
+  it("resolves every delivery incidentEventId to a timeline event case-insensitively", () => {
+    expect(IncidentDetailResponseSchema.safeParse({
+      ...response,
+      deliveries: [{ ...delivery, incidentEventId: eventId.toUpperCase() }],
+    }).success).toBe(true);
+    const result = IncidentDetailResponseSchema.safeParse({
+      ...response,
+      deliveries: [{ ...delivery, incidentEventId: monitorId }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["deliveries", 0, "incidentEventId"]);
+      expect(result.error.issues[0]?.message).toBe(
+        "delivery incidentEventId must reference a timeline event",
+      );
+    }
+  });
+
+  it("requires canonically unique delivery IDs", () => {
+    const result = IncidentDetailResponseSchema.safeParse({
+      ...response,
+      deliveries: [delivery, {
+        ...delivery,
+        id: deliveryId.toUpperCase(),
+        deduplicationKey: "second",
+      }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["deliveries", 1, "id"]);
+      expect(result.error.issues[0]?.message).toBe("delivery ids must be unique");
+    }
+  });
+
+  it("does not resolve channelId against absent channel resources", () => {
+    expect(IncidentDetailResponseSchema.safeParse({
+      ...response,
+      deliveries: [{ ...delivery, id: secondDeliveryId, channelId: monitorId }],
+    }).success).toBe(true);
   });
 });
