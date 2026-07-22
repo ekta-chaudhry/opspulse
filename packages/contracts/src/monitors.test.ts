@@ -194,6 +194,12 @@ describe("monitor create contracts", () => {
     ]) {
       expect(AcceptedStatusRangeSchema.safeParse(acceptedStatus).success).toBe(false);
     }
+    const result = AcceptedStatusRangeSchema.safeParse({ min: 400, max: 399 });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["max"]);
+      expect(result.error.issues[0]?.message).toBe("max must be greater than or equal to min");
+    }
   });
 
   it("rejects unknown accepted status fields", () => {
@@ -280,6 +286,34 @@ describe("monitor create contracts", () => {
 });
 
 describe("request header security", () => {
+  it("accepts Node-compatible HTTP header field-value bytes", () => {
+    for (const value of [
+      "",
+      "\t",
+      " !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+      "\u0080\u00ff",
+    ]) {
+      expect(RequestHeaderSchema.safeParse({ name: "X-Metadata", value }).success).toBe(true);
+    }
+  });
+
+  it("rejects bytes Node does not permit in HTTP header field values", () => {
+    for (const value of [
+      "ordinary\rvalue",
+      "ordinary\nvalue",
+      "ordinary\u0000value",
+      "ordinary\u0001value",
+      "ordinary\u0008value",
+      "ordinary\u000bvalue",
+      "ordinary\u001fvalue",
+      "ordinary\u007fvalue",
+      "ordinary\u0100value",
+      "ordinary😀value",
+    ]) {
+      expect(RequestHeaderSchema.safeParse({ name: "X-Metadata", value }).success).toBe(false);
+    }
+  });
+
   it("rejects case-insensitive duplicate header names", () => {
     expect(HttpMonitorInputSchema.safeParse({
       ...minimalHttpMonitor,
@@ -465,6 +499,12 @@ describe("monitor update contracts", () => {
     expect(UpdateHeartbeatMonitorSchema.safeParse({ kind: "heartbeat" }).success).toBe(false);
     expect(UpdateMonitorSchema.safeParse({ name: "Missing kind" }).success).toBe(false);
     expect(UpdateHttpMonitorSchema.safeParse({ kind: "http", name: undefined }).success).toBe(false);
+    const result = UpdateHttpMonitorSchema.safeParse({ kind: "http" });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual([]);
+      expect(result.error.issues[0]?.message).toBe("at least one change besides kind is required");
+    }
   });
 
   it("dispatches update parsing by monitor kind", () => {
@@ -627,12 +667,28 @@ describe("private monitor projections", () => {
       nextSequence: 5,
       lastEvaluatedSequence: 4,
     }).success).toBe(true);
+    const result = PrivateHttpMonitorSchema.safeParse({
+      ...privateHttpMonitor,
+      nextSequence: 4,
+      lastEvaluatedSequence: 4,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["nextSequence"]);
+      expect(result.error.issues[0]?.message).toBe(
+        "nextSequence must be greater than lastEvaluatedSequence",
+      );
+    }
   });
 
   it("requires unique notification channel IDs and enforces the maximum", () => {
     expect(PrivateHttpMonitorSchema.safeParse({
       ...privateHttpMonitor,
       notificationChannelIds: [firstId, firstId],
+    }).success).toBe(false);
+    expect(PrivateHttpMonitorSchema.safeParse({
+      ...privateHttpMonitor,
+      notificationChannelIds: [firstId, firstId.toUpperCase()],
     }).success).toBe(false);
     const ids = Array.from({ length: 100 }, (_, index) =>
       `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
@@ -693,6 +749,9 @@ describe("monitor query and channel contracts", () => {
     });
     expect(ReplaceMonitorChannelsSchema.safeParse({
       channelIds: [firstId, firstId],
+    }).success).toBe(false);
+    expect(ReplaceMonitorChannelsSchema.safeParse({
+      channelIds: [firstId, firstId.toUpperCase()],
     }).success).toBe(false);
     expect(ReplaceMonitorChannelsSchema.safeParse({ channelIds: [], extra: true }).success).toBe(
       false,
@@ -762,6 +821,25 @@ describe("monitor response envelopes", () => {
     }).success).toBe(false);
   });
 
+  it("requires heartbeat create ping paths to contain their matching token", () => {
+    expect(CreateMonitorResponseSchema.safeParse({
+      monitor: privateHeartbeatMonitor,
+      heartbeat: heartbeatCredentials,
+    }).success).toBe(true);
+    const result = CreateMonitorResponseSchema.safeParse({
+      monitor: privateHeartbeatMonitor,
+      heartbeat: {
+        ...heartbeatCredentials,
+        pingPath: `/v1/heartbeats/${"b".repeat(43)}`,
+      },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["heartbeat", "pingPath"]);
+      expect(result.error.issues[0]?.message).toBe("pingPath token must match token");
+    }
+  });
+
   it("enforces heartbeat token length and base64url alphabet", () => {
     for (const token of ["a".repeat(42), "a".repeat(129), `${"a".repeat(42)}+`]) {
       expect(CreateMonitorResponseSchema.safeParse({
@@ -769,9 +847,10 @@ describe("monitor response envelopes", () => {
         heartbeat: { ...heartbeatCredentials, token },
       }).success).toBe(false);
     }
+    const token = `${"A".repeat(42)}_`;
     expect(CreateMonitorResponseSchema.safeParse({
       monitor: privateHeartbeatMonitor,
-      heartbeat: { ...heartbeatCredentials, token: `${"A".repeat(42)}_` },
+      heartbeat: { token, pingPath: `/v1/heartbeats/${token}` },
     }).success).toBe(true);
   });
 
@@ -807,5 +886,22 @@ describe("monitor response envelopes", () => {
     expect(HeartbeatTokenResponseSchema.safeParse({ ...response, rotatedAt: "not-a-time" }).success).toBe(
       false,
     );
+  });
+
+  it("requires heartbeat token response ping paths to contain their matching token", () => {
+    expect(HeartbeatTokenResponseSchema.safeParse({
+      ...heartbeatCredentials,
+      rotatedAt: timestamp,
+    }).success).toBe(true);
+    const result = HeartbeatTokenResponseSchema.safeParse({
+      ...heartbeatCredentials,
+      pingPath: `/v1/heartbeats/${"b".repeat(43)}`,
+      rotatedAt: timestamp,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["pingPath"]);
+      expect(result.error.issues[0]?.message).toBe("pingPath token must match token");
+    }
   });
 });

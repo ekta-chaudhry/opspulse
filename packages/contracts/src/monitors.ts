@@ -39,6 +39,19 @@ function isSafeHeaderName(name: string): boolean {
   );
 }
 
+function isHttpHeaderValue(value: string): boolean {
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (
+      code !== 0x09 &&
+      (code < 0x20 || code === 0x7f || code > 0xff)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function isSafeHeaderValue(value: string): boolean {
   const trimmedValue = value.trim();
   return (
@@ -53,7 +66,10 @@ const AcceptedStatusRangeValueSchema = z
     min: z.number().int().min(100).max(599),
     max: z.number().int().min(100).max(599),
   })
-  .refine(({ min, max }) => min <= max);
+  .refine(({ min, max }) => min <= max, {
+    path: ["max"],
+    message: "max must be greater than or equal to min",
+  });
 
 export const AcceptedStatusRangeSchema = AcceptedStatusRangeValueSchema.default({
   min: 200,
@@ -68,7 +84,7 @@ export const RequestHeaderSchema = z.strictObject({
     .max(128)
     .regex(/^[!#$%&'*+\-.^_`|~A-Za-z0-9]+$/)
     .refine(isSafeHeaderName),
-  value: z.string().max(1024).refine(isSafeHeaderValue),
+  value: z.string().max(1024).refine(isHttpHeaderValue).refine(isSafeHeaderValue),
 });
 export type RequestHeader = z.infer<typeof RequestHeaderSchema>;
 
@@ -137,7 +153,7 @@ export const UpdateHttpMonitorSchema = z
     acceptedStatus: AcceptedStatusRangeValueSchema.optional(),
     headers: HeadersSchema.optional(),
   })
-  .refine(hasUpdateChange);
+  .refine(hasUpdateChange, { message: "at least one change besides kind is required" });
 export type UpdateHttpMonitor = z.infer<typeof UpdateHttpMonitorSchema>;
 
 export const UpdateHeartbeatMonitorSchema = z
@@ -146,7 +162,7 @@ export const UpdateHeartbeatMonitorSchema = z
     ...updateCommonShape,
     gracePeriodSeconds: z.number().int().min(0).max(86_400).optional(),
   })
-  .refine(hasUpdateChange);
+  .refine(hasUpdateChange, { message: "at least one change besides kind is required" });
 export type UpdateHeartbeatMonitor = z.infer<typeof UpdateHeartbeatMonitorSchema>;
 
 export const UpdateMonitorSchema = z.discriminatedUnion("kind", [
@@ -160,7 +176,10 @@ const PositiveSafeIntegerSchema = z.number().int().min(1).max(Number.MAX_SAFE_IN
 const UniqueIdsSchema = z
   .array(IdSchema)
   .max(100)
-  .refine((ids) => new Set(ids).size === ids.length);
+  .refine((ids) => {
+    const canonicalIds = ids.map((id) => id.toLowerCase());
+    return new Set(canonicalIds).size === canonicalIds.length;
+  });
 const ActiveIncidentSchema = IncidentSummarySchema.nullable() satisfies z.ZodType<
   IncidentSummary | null
 >;
@@ -198,7 +217,10 @@ export const PrivateHttpMonitorSchema = z
     headers: HeadersSchema,
     nextCheckAt: TimestampSchema.nullable(),
   })
-  .refine(({ nextSequence, lastEvaluatedSequence }) => nextSequence > lastEvaluatedSequence);
+  .refine(({ nextSequence, lastEvaluatedSequence }) => nextSequence > lastEvaluatedSequence, {
+    path: ["nextSequence"],
+    message: "nextSequence must be greater than lastEvaluatedSequence",
+  });
 export type PrivateHttpMonitor = z.infer<typeof PrivateHttpMonitorSchema>;
 
 export const PrivateHeartbeatMonitorSchema = z
@@ -209,7 +231,10 @@ export const PrivateHeartbeatMonitorSchema = z
     lastHeartbeatAt: TimestampSchema.nullable(),
     nextHeartbeatDeadline: TimestampSchema.nullable(),
   })
-  .refine(({ nextSequence, lastEvaluatedSequence }) => nextSequence > lastEvaluatedSequence);
+  .refine(({ nextSequence, lastEvaluatedSequence }) => nextSequence > lastEvaluatedSequence, {
+    path: ["nextSequence"],
+    message: "nextSequence must be greater than lastEvaluatedSequence",
+  });
 export type PrivateHeartbeatMonitor = z.infer<typeof PrivateHeartbeatMonitorSchema>;
 
 export const PrivateMonitorSchema = z.discriminatedUnion("kind", [
@@ -248,10 +273,21 @@ const HeartbeatPingPathSchema = z
   .min(1)
   .max(2048)
   .regex(/^\/v1\/heartbeats\/[A-Za-z0-9_-]{43,128}$/);
-const HeartbeatCredentialsSchema = z.strictObject({
-  token: HeartbeatTokenSchema,
-  pingPath: HeartbeatPingPathSchema,
-});
+const MatchingHeartbeatTokenRefinement = {
+  path: ["pingPath"],
+  message: "pingPath token must match token",
+};
+
+function hasMatchingHeartbeatToken(credentials: { token: string; pingPath: string }): boolean {
+  return credentials.pingPath === `/v1/heartbeats/${credentials.token}`;
+}
+
+const HeartbeatCredentialsSchema = z
+  .strictObject({
+    token: HeartbeatTokenSchema,
+    pingPath: HeartbeatPingPathSchema,
+  })
+  .refine(hasMatchingHeartbeatToken, MatchingHeartbeatTokenRefinement);
 
 export const CreateMonitorResponseSchema = z.union([
   z.strictObject({ monitor: PrivateHttpMonitorSchema }),
@@ -267,11 +303,13 @@ export const LifecycleCommandResponseSchema = z.strictObject({
 });
 export type LifecycleCommandResponse = z.infer<typeof LifecycleCommandResponseSchema>;
 
-export const HeartbeatTokenResponseSchema = z.strictObject({
-  token: HeartbeatTokenSchema,
-  pingPath: HeartbeatPingPathSchema,
-  rotatedAt: TimestampSchema,
-});
+export const HeartbeatTokenResponseSchema = z
+  .strictObject({
+    token: HeartbeatTokenSchema,
+    pingPath: HeartbeatPingPathSchema,
+    rotatedAt: TimestampSchema,
+  })
+  .refine(hasMatchingHeartbeatToken, MatchingHeartbeatTokenRefinement);
 export type HeartbeatTokenResponse = z.infer<typeof HeartbeatTokenResponseSchema>;
 
 export const ReplaceMonitorChannelsSchema = z.strictObject({
