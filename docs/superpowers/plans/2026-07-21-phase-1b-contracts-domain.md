@@ -42,12 +42,13 @@ exec docker run --rm --init \
   --user "$(id -u):$(id -g)" \
   -e HOME=/tmp \
   -e COREPACK_HOME=/tmp/corepack \
+  -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
   -e PNPM_HOME=/tmp/pnpm \
   -e PNPM_STORE_DIR=/workspace/.pnpm-store \
   -v "$PWD:/workspace" \
   -w /workspace \
   node:24.18.0-bookworm \
-  sh -lc 'if [ "$1" = pnpm ]; then shift; exec corepack pnpm "$@"; else exec "$@"; fi' sh "$@"
+  sh -lc 'mkdir -p "$PNPM_HOME"; corepack enable pnpm --install-directory "$PNPM_HOME"; export PATH="$PNPM_HOME:$PATH"; printf "%s\n" "export PATH=\"\$PNPM_HOME:\$PATH\"" > "$HOME/.profile"; if [ "$1" = pnpm ]; then shift; exec pnpm "$@"; else exec "$@"; fi' sh "$@"
 ```
 
 Every red/green/build/typecheck/install command below invokes `scripts/run-node24`; no shell function or host Node command is allowed.
@@ -518,10 +519,11 @@ These approved requirements are intentionally not runtime-enforced in contracts/
 
 - [ ] **Step 1: Create the wrapper** with the exact script from Persistent Node 24 Wrapper.
 - [ ] **Step 2: Set executable mode:** `chmod +x scripts/run-node24 && test -x scripts/run-node24`; expected exit 0.
-- [ ] **Step 3: Verify runtime:** `scripts/run-node24 node --version`; expected exactly `v24.18.0`.
-- [ ] **Step 4: Verify Corepack:** `scripts/run-node24 pnpm --version`; expected exactly `10.30.3`.
-- [ ] **Step 5: Verify tracked mode:** `git add scripts/run-node24 && git diff --cached --summary`; expected `create mode 100755 scripts/run-node24`.
-- [ ] **Step 6: Commit:** `git commit -m "chore: add Node 24 command wrapper"`.
+- [ ] **Step 3: Verify the pnpm shim is exposed to nested package scripts:** `scripts/run-node24 sh -lc 'actual=$(command -v pnpm || true); if [ "$actual" = /tmp/pnpm/pnpm ]; then printf "pnpm shim found: %s\n" "$actual"; else printf "pnpm shim missing; found: %s\n" "${actual:-<none>}" >&2; exit 1; fi'`; expected exactly `pnpm shim found: /tmp/pnpm/pnpm`.
+- [ ] **Step 4: Verify runtime:** `scripts/run-node24 node --version`; expected exactly `v24.18.0`.
+- [ ] **Step 5: Verify pnpm:** `scripts/run-node24 pnpm --version`; expected exactly `10.30.3`.
+- [ ] **Step 6: Verify tracked mode:** `git add scripts/run-node24 && git diff --cached --summary`; expected `create mode 100755 scripts/run-node24`.
+- [ ] **Step 7: Commit:** `git commit -m "chore: add Node 24 command wrapper"`.
 
 ### Task 1: Common, Error, Session, And Health Modules
 

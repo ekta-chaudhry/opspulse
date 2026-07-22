@@ -4,9 +4,10 @@ exec docker run --rm --init \
   --user "$(id -u):$(id -g)" \
   -e HOME=/tmp \
   -e COREPACK_HOME=/tmp/corepack \
+  -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
   -e PNPM_HOME=/tmp/pnpm \
   -e PNPM_STORE_DIR=/workspace/.pnpm-store \
   -v "$PWD:/workspace" \
   -w /workspace \
   node:24.18.0-bookworm \
-  sh -lc 'if [ "$1" = pnpm ]; then shift; exec corepack pnpm "$@"; else exec "$@"; fi' sh "$@"
+  sh -lc 'mkdir -p "$PNPM_HOME"; corepack enable pnpm --install-directory "$PNPM_HOME"; export PATH="$PNPM_HOME:$PATH"; printf "%s\n" "export PATH=\"\$PNPM_HOME:\$PATH\"" > "$HOME/.profile"; if [ "$1" = pnpm ]; then shift; exec pnpm "$@"; else exec "$@"; fi' sh "$@"
