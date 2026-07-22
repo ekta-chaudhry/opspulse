@@ -1,5 +1,6 @@
 import { afterEach, expect, it } from "vitest";
 import { createDatabasePool } from "./client.js";
+import type { QueryClient } from "./client.js";
 import type { TransactionPool } from "./transaction.js";
 
 const pools: Array<ReturnType<typeof createDatabasePool>> = [];
@@ -20,8 +21,10 @@ it("creates a bounded pool from explicit connection settings", () => {
     ssl: true,
   });
   pools.push(pool);
+  const queryClient: QueryClient = pool;
   const transactionPool: TransactionPool = pool;
 
+  expect(queryClient).toBe(pool);
   expect(transactionPool).toBe(pool);
   expect(pool.options).toMatchObject({
     connectionString: "postgresql://explicit.example/opspulse",

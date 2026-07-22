@@ -1,5 +1,13 @@
 import { Pool, type PoolConfig } from "pg";
 
+export type QueryResult = {
+  rows: unknown[];
+};
+
+export interface QueryClient {
+  query(text: string, values?: unknown[]): Promise<QueryResult>;
+}
+
 export type DatabasePoolConfig = {
   connectionString: string;
   maxConnections?: number;
