@@ -51,6 +51,88 @@ export type {
 export { FailureCategorySchema, FailureCauseSchema } from "./failure-causes.js";
 export type { FailureCategory, FailureCause } from "./failure-causes.js";
 
+export {
+  CancelledCheckHistoryItemSchema,
+  CheckHistoryItemSchema,
+  CheckListQuerySchema,
+  CheckListResponseSchema,
+  CheckRequestSchema,
+  CheckRequestSourceSchema,
+  CheckRequestStatusSchema,
+  CheckResultSchema,
+  CheckRunSchema,
+  CompletedCheckHistoryItemSchema,
+  MonitoringErrorSchema,
+  PendingCheckHistoryItemSchema,
+} from "./checks.js";
+export type {
+  CancelledCheckHistoryItem,
+  CheckHistoryItem,
+  CheckListQuery,
+  CheckListResponse,
+  CheckRequest,
+  CheckRequestSource,
+  CheckRequestStatus,
+  CheckResult,
+  CheckRun,
+  CompletedCheckHistoryItem,
+  MonitoringError,
+  PendingCheckHistoryItem,
+} from "./checks.js";
+
+export {
+  HeartbeatAcceptedSchema,
+  HeartbeatHeadersSchema,
+  HeartbeatTokenParamsSchema,
+} from "./heartbeats.js";
+export type {
+  HeartbeatAccepted,
+  HeartbeatHeaders,
+  HeartbeatTokenParams,
+} from "./heartbeats.js";
+
+export {
+  IncidentListQuerySchema,
+  IncidentListResponseSchema,
+  IncidentSchema,
+  IncidentStatusSchema,
+  ResolutionReasonSchema,
+} from "./incidents.js";
+export type {
+  Incident,
+  IncidentListQuery,
+  IncidentListResponse,
+  IncidentStatus,
+  ResolutionReason,
+} from "./incidents.js";
+
+export {
+  FailureObservedDetailsSchema,
+  FailureObservedIncidentEventSchema,
+  IncidentEventSchema,
+  NotificationQueuedDetailsSchema,
+  NotificationQueuedIncidentEventSchema,
+  OpenedDetailsSchema,
+  OpenedIncidentEventSchema,
+  RecoveryObservedDetailsSchema,
+  RecoveryObservedIncidentEventSchema,
+  ResolvedDetailsSchema,
+  ResolvedIncidentEventSchema,
+} from "./incident-events.js";
+export type {
+  FailureObservedDetails,
+  FailureObservedIncidentEvent,
+  IncidentEvent,
+  NotificationQueuedDetails,
+  NotificationQueuedIncidentEvent,
+  OpenedDetails,
+  OpenedIncidentEvent,
+  RecoveryObservedDetails,
+  RecoveryObservedIncidentEvent,
+  ResolvedDetails,
+  ResolvedIncidentEvent,
+} from "./incident-events.js";
+
 export { IncidentSummarySchema } from "./incident-summary.js";
 export type { IncidentSummary } from "./incident-summary.js";
 
