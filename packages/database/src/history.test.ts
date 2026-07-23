@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { QueryClient, QueryResult } from "./client.js";
 import {
   InvalidHistoryCursorError,
+  listChecks,
   listIncidents,
   listMonitorChecks,
 } from "./history.js";
@@ -42,6 +43,7 @@ const completedRow = {
   request_scheduled_at: now,
   request_terminal_at: now,
   request_created_at: now,
+  request_cursor_timestamp: "2026-07-22T10:00:00.123456Z",
   run_id: runId,
   run_result: "failure",
   run_http_status: null,
@@ -62,6 +64,7 @@ const pendingRow = {
   request_scheduled_at: new Date("2026-07-22T10:01:00.000Z"),
   request_terminal_at: null,
   request_created_at: new Date("2026-07-22T10:01:00.000Z"),
+  request_cursor_timestamp: "2026-07-22T10:01:00.654321Z",
   run_id: null,
   run_result: null,
   run_http_status: null,
@@ -82,6 +85,7 @@ const incidentRow = {
   opening_cause: cause,
   latest_cause: cause,
   resolution_reason: null,
+  incident_cursor_timestamp: "2026-07-22T10:00:00.123456Z",
 };
 
 describe("monitor and incident history", () => {
@@ -97,6 +101,17 @@ describe("monitor and incident history", () => {
     expect(page.page).toEqual({ nextCursor: null, hasMore: false });
     expect(pool.calls[0]?.text).toContain("ORDER BY cr.scheduled_at DESC, cr.id DESC");
     expect(pool.calls[0]?.values).toEqual([monitorId, 26]);
+  });
+
+  it("lists recent checks across all monitors with one bounded query", async () => {
+    const pool = new FakeQueryClient([{ rows: [completedRow] }]);
+
+    const page = await listChecks(pool, { limit: 12 });
+
+    expect(page.items.map(({ request }) => request.id)).toEqual([requestId]);
+    expect(pool.calls[0]?.text).not.toContain("cr.monitor_id = $1");
+    expect(pool.calls[0]?.text).toContain("ORDER BY cr.scheduled_at DESC, cr.id DESC");
+    expect(pool.calls[0]?.values).toEqual([13]);
   });
 
   it("applies every check filter with parameterized SQL and permits the max limit", async () => {
@@ -138,7 +153,7 @@ describe("monitor and incident history", () => {
     );
     expect(pool.calls[1]?.values).toEqual([
       monitorId,
-      "2026-07-22T10:01:00.000Z",
+      "2026-07-22T10:01:00.654321Z",
       pendingRequestId,
       2,
     ]);
@@ -192,7 +207,7 @@ describe("monitor and incident history", () => {
       "(started_at, id) < ($1::timestamptz, $2::uuid)",
     );
     expect(pool.calls[1]?.values).toEqual([
-      "2026-07-22T10:00:00.000Z",
+      "2026-07-22T10:00:00.123456Z",
       incidentId,
       2,
     ]);

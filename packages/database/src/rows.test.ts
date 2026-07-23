@@ -5,6 +5,7 @@ import {
   toCheckHistoryItem,
   toIncident,
   toPrivateHttpMonitor,
+  toPrivateMonitor,
 } from "./rows.js";
 
 const monitorId = "11111111-1111-4111-8111-111111111111";
@@ -109,6 +110,29 @@ describe("PostgreSQL row conversion", () => {
     });
   });
 
+  it("maps a heartbeat monitor through the discriminated private contract", () => {
+    expect(toPrivateMonitor({
+      ...monitorRow,
+      kind: "heartbeat",
+      url: null,
+      method: null,
+      timeout_seconds: null,
+      accepted_status_min: null,
+      accepted_status_max: null,
+      headers: null,
+      next_check_at: null,
+      grace_period_seconds: 90,
+      last_heartbeat_at: now,
+      next_heartbeat_deadline: new Date("2026-07-22T10:01:30.000Z"),
+    })).toMatchObject({
+      id: monitorId,
+      kind: "heartbeat",
+      gracePeriodSeconds: 90,
+      lastHeartbeatAt: "2026-07-22T10:00:00.000Z",
+      nextHeartbeatDeadline: "2026-07-22T10:01:30.000Z",
+    });
+  });
+
   it("parses completed history causes through the failure-cause contract", () => {
     const history = toCheckHistoryItem({
       request_id: requestId,
@@ -152,6 +176,30 @@ describe("PostgreSQL row conversion", () => {
         run_evaluated_at: now,
       }),
     ).toThrow();
+  });
+
+  it("projects internally cancelled requests as safe monitoring errors", () => {
+    const cancelledAt = new Date("2026-07-22T10:01:00.000Z");
+
+    expect(toCheckHistoryItem({
+      request_id: requestId,
+      request_monitor_id: monitorId,
+      request_generation: "0",
+      request_sequence: "1",
+      request_source: "http_schedule",
+      request_status: "cancelled-internal",
+      request_scheduled_at: now,
+      request_terminal_at: cancelledAt,
+      request_created_at: now,
+      run_id: null,
+    })).toMatchObject({
+      request: { status: "cancelled-internal" },
+      run: null,
+      monitoringError: {
+        safeSummary: "Check cancelled after monitor lifecycle changed",
+        recordedAt: "2026-07-22T10:01:00.000Z",
+      },
+    });
   });
 
   it("maps incident JSON causes and timestamps through the incident contract", () => {

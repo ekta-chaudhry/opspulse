@@ -22,6 +22,12 @@ describe("startApiServer", () => {
     const app = {} as Express;
     let appDependencies: AppDependencies | undefined;
     const createHttpMonitor = vi.fn(() => Promise.resolve({ marker: "monitor" }));
+    const getMonitor = vi.fn(() => Promise.resolve({ marker: "monitor-detail" }));
+    const pauseMonitor = vi.fn(() => Promise.resolve({ marker: "paused" }));
+    const resumeMonitor = vi.fn(() => Promise.resolve({ marker: "resumed" }));
+    const archiveMonitor = vi.fn(() => Promise.resolve({ marker: "archived" }));
+    const listMonitors = vi.fn(() => Promise.resolve({ marker: "monitors" }));
+    const listChecks = vi.fn(() => Promise.resolve({ marker: "recent-checks" }));
     const listMonitorChecks = vi.fn(() => Promise.resolve({ marker: "checks" }));
     const listIncidents = vi.fn(() => Promise.resolve({ marker: "incidents" }));
     const createPool = vi.fn(() => pool);
@@ -34,6 +40,12 @@ describe("startApiServer", () => {
         return app;
       }),
       createHttpMonitor,
+      getMonitor,
+      pauseMonitor,
+      resumeMonitor,
+      archiveMonitor,
+      listMonitors,
+      listChecks,
       listMonitorChecks,
       listIncidents,
       listen,
@@ -59,9 +71,21 @@ describe("startApiServer", () => {
     if (operations === undefined) throw new Error("application dependencies were not captured");
     const input = { kind: "http" } as HttpMonitorInput;
     await operations.createHttpMonitor(input);
+    await operations.getMonitor("monitor-id");
+    await operations.pauseMonitor("monitor-id");
+    await operations.resumeMonitor("monitor-id");
+    await operations.archiveMonitor("monitor-id");
+    await operations.listMonitors({ limit: 25 });
+    await operations.listChecks({ limit: 12 });
     await operations.listMonitorChecks("monitor-id", { limit: 10 });
     await operations.listIncidents({ status: "open", limit: 5 });
     expect(createHttpMonitor).toHaveBeenCalledWith(pool, input);
+    expect(getMonitor).toHaveBeenCalledWith(pool, "monitor-id");
+    expect(pauseMonitor).toHaveBeenCalledWith(pool, "monitor-id");
+    expect(resumeMonitor).toHaveBeenCalledWith(pool, "monitor-id");
+    expect(archiveMonitor).toHaveBeenCalledWith(pool, "monitor-id");
+    expect(listMonitors).toHaveBeenCalledWith(pool, { limit: 25 });
+    expect(listChecks).toHaveBeenCalledWith(pool, { limit: 12 });
     expect(listMonitorChecks).toHaveBeenCalledWith(pool, "monitor-id", {
       limit: 10,
     });

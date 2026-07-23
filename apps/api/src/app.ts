@@ -8,8 +8,12 @@ import {
   CreateMonitorSchema,
   IncidentListQuerySchema,
   IncidentListResponseSchema,
+  LifecycleCommandResponseSchema,
   LivenessResponseSchema,
   MonitorIdParamsSchema,
+  MonitorListQuerySchema,
+  MonitorListResponseSchema,
+  MonitorResponseSchema,
   z,
   type ApiErrorCode,
   type ApiErrorDetail,
@@ -18,23 +22,37 @@ import {
   type HttpMonitorInput,
   type IncidentListResponse,
   type IncidentListQuery,
+  type MonitorListQuery,
+  type MonitorListResponse,
   type PrivateHttpMonitor,
+  type PrivateMonitor,
 } from "@opspulse/contracts";
-import { InvalidHistoryCursorError } from "@opspulse/database";
+import {
+  InvalidHistoryCursorError,
+  MonitorLifecycleConflictError,
+  MonitorNotFoundError,
+} from "@opspulse/database";
 import express, {
   type ErrorRequestHandler,
   type Request,
   type Response,
 } from "express";
 import { randomUUID } from "node:crypto";
+import { DASHBOARD_HTML } from "./dashboard.js";
 
 export type AppDependencies = {
+  archiveMonitor: (monitorId: string) => Promise<PrivateMonitor>;
   createHttpMonitor: (input: HttpMonitorInput) => Promise<PrivateHttpMonitor>;
+  getMonitor: (monitorId: string) => Promise<PrivateMonitor | null>;
+  listChecks: (options: CheckListQuery) => Promise<CheckListResponse>;
+  listMonitors: (options: MonitorListQuery) => Promise<MonitorListResponse>;
   listMonitorChecks: (
     monitorId: string,
     options: CheckListQuery,
   ) => Promise<CheckListResponse>;
   listIncidents: (options: IncidentListQuery) => Promise<IncidentListResponse>;
+  pauseMonitor: (monitorId: string) => Promise<PrivateMonitor>;
+  resumeMonitor: (monitorId: string) => Promise<PrivateMonitor>;
 };
 
 class ApiHttpError extends Error {
@@ -108,7 +126,24 @@ export function createApp(dependencies: AppDependencies): express.Express {
     );
   });
 
+  app.get("/", (_request, response) => {
+    response.setHeader("Cache-Control", "no-store");
+    response.type("html").send(DASHBOARD_HTML);
+  });
+
   // These private operations are unauthenticated only for this local runnable milestone.
+  app.get("/v1/monitors", async (request, response) => {
+    const query = parse(MonitorListQuerySchema, request.query);
+    const result = await dependencies.listMonitors(query);
+    response.json(MonitorListResponseSchema.parse(result));
+  });
+
+  app.get("/v1/checks", async (request, response) => {
+    const query = parse(CheckListQuerySchema, request.query);
+    const result = await dependencies.listChecks(query);
+    response.json(CheckListResponseSchema.parse(result));
+  });
+
   app.post("/v1/monitors", async (request, response) => {
     const input = parse(CreateMonitorSchema, request.body);
     if (input.kind === "heartbeat") {
@@ -121,9 +156,26 @@ export function createApp(dependencies: AppDependencies): express.Express {
     response.status(201).json(CreateMonitorResponseSchema.parse({ monitor }));
   });
 
+  app.get("/v1/monitors/:monitorId", async (request, response) => {
+    const { monitorId } = parse(MonitorIdParamsSchema, request.params);
+    const monitor = await dependencies.getMonitor(monitorId);
+    if (monitor === null) throw new ApiHttpError("not_found", "Monitor not found");
+    response.json(MonitorResponseSchema.parse({ monitor }));
+  });
+
+  for (const command of ["pause", "resume", "archive"] as const) {
+    app.post(`/v1/monitors/:monitorId/${command}`, async (request, response) => {
+      const { monitorId } = parse(MonitorIdParamsSchema, request.params);
+      const monitor = await dependencies[`${command}Monitor`](monitorId);
+      response.json(LifecycleCommandResponseSchema.parse({ monitor }));
+    });
+  }
+
   app.get("/v1/monitors/:monitorId/checks", async (request, response) => {
     const { monitorId } = parse(MonitorIdParamsSchema, request.params);
     const query = parse(CheckListQuerySchema, request.query);
+    const monitor = await dependencies.getMonitor(monitorId);
+    if (monitor === null) throw new ApiHttpError("not_found", "Monitor not found");
     const result = await dependencies.listMonitorChecks(monitorId, query);
     response.json(CheckListResponseSchema.parse(result));
   });
@@ -146,7 +198,11 @@ export function createApp(dependencies: AppDependencies): express.Express {
         ? new ApiHttpError("invalid_request", "Request validation failed", [
           { field: "cursor", issue: "Invalid cursor" },
         ])
-      : isBodyParserError(error)
+        : error instanceof MonitorNotFoundError
+          ? new ApiHttpError("not_found", "Monitor not found")
+          : error instanceof MonitorLifecycleConflictError
+            ? new ApiHttpError("conflict", error.message)
+        : isBodyParserError(error)
         ? new ApiHttpError("invalid_request", "Request body is invalid")
         : new ApiHttpError("internal_error", "An internal error occurred");
     const body = ApiErrorSchema.parse({

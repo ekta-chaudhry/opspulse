@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { verticalSliceMigrationSql } from "./migrations/0001-vertical-slice.js";
 import { checkRequestLeasesMigrationSql } from "./migrations/0002-check-request-leases.js";
+import { monitorListIndexMigrationSql } from "./migrations/0003-monitor-list-index.js";
+import { globalHistoryIndexesMigrationSql } from "./migrations/0004-global-history-indexes.js";
 import {
   withTransaction,
   type TransactionClient,
@@ -30,6 +32,16 @@ export const MIGRATIONS: readonly Migration[] = [
     id: "0002-check-request-leases",
     sql: checkRequestLeasesMigrationSql,
     checksum: checksum(checkRequestLeasesMigrationSql),
+  },
+  {
+    id: "0003-monitor-list-index",
+    sql: monitorListIndexMigrationSql,
+    checksum: checksum(monitorListIndexMigrationSql),
+  },
+  {
+    id: "0004-global-history-indexes",
+    sql: globalHistoryIndexesMigrationSql,
+    checksum: checksum(globalHistoryIndexesMigrationSql),
   },
 ];
 

@@ -1,8 +1,10 @@
 import {
   CompletedCheckHistoryItemSchema,
+  CheckHistoryItemSchema,
   FailureCauseSchema,
   IdSchema,
   type CompletedCheckHistoryItem,
+  type CheckHistoryItem,
   type FailureCause,
   type IncidentSummary,
 } from "@opspulse/contracts";
@@ -35,7 +37,7 @@ export type HttpCheckOutcome =
   };
 
 export type CompleteHttpCheckResult = {
-  historyItem: CompletedCheckHistoryItem;
+  historyItem: CheckHistoryItem;
   incident: IncidentSummary | null;
 };
 
@@ -172,10 +174,38 @@ export async function completeHttpCheck(
         incident: await loadActiveIncident(client, request.id),
       };
     }
-    if (request.status !== "pending") {
-      throw new CheckCompletionConflictError(
-        `HTTP check request cannot be completed from ${request.status}`,
+    if (request.status === "cancelled-internal") {
+      const checkedOutcome = validateOutcome(outcome);
+      const insertedRun = await client.query(
+        `INSERT INTO check_runs (
+          request_id, monitor_id, generation, sequence, result, http_status,
+          latency_ms, cause, completed_at, evaluated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, NULL)
+        RETURNING id`,
+        [
+          null,
+          request.monitorId,
+          String(request.generation),
+          String(request.sequence),
+          checkedOutcome.result,
+          checkedOutcome.httpStatus,
+          checkedOutcome.latencyMs === null ? null : String(checkedOutcome.latencyMs),
+          checkedOutcome.cause === null ? null : JSON.stringify(checkedOutcome.cause),
+          now,
+        ],
       );
+      if (insertedRun.rows[0] === undefined) throw new Error("late check run insert returned no row");
+      return {
+        historyItem: CheckHistoryItemSchema.parse({
+          request,
+          run: null,
+          monitoringError: {
+            safeSummary: "Check cancelled after monitor lifecycle changed",
+            recordedAt: request.terminalAt,
+          },
+        }),
+        incident: await loadActiveIncident(client, request.id),
+      };
     }
     if (request.source !== "http_schedule") {
       throw new CheckCompletionConflictError("check request is not an HTTP schedule request");

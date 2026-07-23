@@ -1,10 +1,17 @@
 import {
+  archiveMonitor,
   createDatabasePool,
   createHttpMonitor,
+  listChecks,
   listIncidents,
   listMonitorChecks,
+  listMonitors,
+  getMonitor,
+  pauseMonitor,
+  resumeMonitor,
   type DatabasePoolConfig,
   type QueryClient,
+  type TransactionPool,
 } from "@opspulse/database";
 import type { Express } from "express";
 import { pathToFileURL } from "node:url";
@@ -19,15 +26,21 @@ export type ClosableServer = {
   close(callback: (error?: Error) => void): void;
 };
 
-type ApiPool = QueryClient & {
+type ApiPool = QueryClient & TransactionPool & {
   end(): Promise<void>;
 };
 
 export type ApiRuntimeDependencies = {
+  archiveMonitor: typeof archiveMonitor;
   createPool(config: DatabasePoolConfig): ApiPool;
   createApplication(dependencies: AppDependencies): Express;
   createHttpMonitor: typeof createHttpMonitor;
+  getMonitor: typeof getMonitor;
+  listChecks: typeof listChecks;
   listMonitorChecks: typeof listMonitorChecks;
+  listMonitors: typeof listMonitors;
+  pauseMonitor: typeof pauseMonitor;
+  resumeMonitor: typeof resumeMonitor;
   listIncidents: typeof listIncidents;
   listen(app: Express, port: number, host: string): Promise<ClosableServer>;
   log(entry: LogEntry): void;
@@ -58,10 +71,16 @@ function listen(app: Express, port: number, host: string): Promise<ClosableServe
 }
 
 const defaultDependencies: ApiRuntimeDependencies = {
+  archiveMonitor,
   createPool: createDatabasePool,
   createApplication: createApp,
   createHttpMonitor,
+  getMonitor,
+  listChecks,
   listMonitorChecks,
+  listMonitors,
+  pauseMonitor,
+  resumeMonitor,
   listIncidents,
   listen,
   log: writeLog,
@@ -82,10 +101,16 @@ export async function startApiServer(
 ): Promise<ApiRuntime> {
   const pool = dependencies.createPool({ connectionString: config.databaseUrl });
   const app = dependencies.createApplication({
+    archiveMonitor: (monitorId) => dependencies.archiveMonitor(pool, monitorId),
     createHttpMonitor: (input) => dependencies.createHttpMonitor(pool, input),
+    getMonitor: (monitorId) => dependencies.getMonitor(pool, monitorId),
+    listChecks: (options) => dependencies.listChecks(pool, options),
+    listMonitors: (options) => dependencies.listMonitors(pool, options),
     listMonitorChecks: (monitorId, options) =>
       dependencies.listMonitorChecks(pool, monitorId, options),
     listIncidents: (options) => dependencies.listIncidents(pool, options),
+    pauseMonitor: (monitorId) => dependencies.pauseMonitor(pool, monitorId),
+    resumeMonitor: (monitorId) => dependencies.resumeMonitor(pool, monitorId),
   });
 
   let server: ClosableServer;

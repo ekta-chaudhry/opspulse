@@ -17,13 +17,24 @@ export type {
 } from "./evaluate-monitor.js";
 export {
   InvalidHistoryCursorError,
+  listChecks,
   listIncidents,
   listMonitorChecks,
 } from "./history.js";
 export type { CheckHistoryFilter, IncidentHistoryFilter } from "./history.js";
 export { MIGRATIONS, MIGRATION_LOCK_KEY, runMigrations } from "./migrations.js";
 export type { Migration, MigrationClient } from "./migrations.js";
-export { createHttpMonitor, getHttpMonitor } from "./monitors.js";
+export {
+  archiveMonitor,
+  createHttpMonitor,
+  getHttpMonitor,
+  getMonitor,
+  listMonitors,
+  MonitorLifecycleConflictError,
+  MonitorNotFoundError,
+  pauseMonitor,
+  resumeMonitor,
+} from "./monitors.js";
 export {
   pgInt8ToSafeInteger,
   pgTimestampToIso,
@@ -32,6 +43,8 @@ export {
   toIncident,
   toIncidentSummary,
   toPrivateHttpMonitor,
+  toPrivateHeartbeatMonitor,
+  toPrivateMonitor,
 } from "./rows.js";
 export { claimDueHttpCheck } from "./scheduling.js";
 export type { HttpCheckWorkItem } from "./scheduling.js";

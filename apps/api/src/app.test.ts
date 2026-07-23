@@ -4,9 +4,13 @@ import {
   CreateMonitorResponseSchema,
   IncidentListResponseSchema,
   LivenessResponseSchema,
+  LifecycleCommandResponseSchema,
+  MonitorListResponseSchema,
+  MonitorResponseSchema,
   type CheckListResponse,
   type HttpMonitorInput,
   type IncidentListResponse,
+  type MonitorListResponse,
   type PrivateHttpMonitor,
 } from "@opspulse/contracts";
 import { InvalidHistoryCursorError } from "@opspulse/database";
@@ -52,10 +56,26 @@ const emptyIncidents: IncidentListResponse = IncidentListResponseSchema.parse({
   items: [],
   page: { nextCursor: null, hasMore: false },
 });
+const monitors: MonitorListResponse = MonitorListResponseSchema.parse({
+  items: [monitor],
+  page: { nextCursor: null, hasMore: false },
+});
 
 function dependencies(): AppDependencies {
   return {
+    archiveMonitor: vi.fn(() => Promise.resolve({
+      ...monitor,
+      lifecycle: "archived" as const,
+    })),
     createHttpMonitor: vi.fn(() => Promise.resolve(monitor)),
+    getMonitor: vi.fn(() => Promise.resolve(monitor)),
+    listChecks: vi.fn(() => Promise.resolve(emptyChecks)),
+    listMonitors: vi.fn(() => Promise.resolve(monitors)),
+    pauseMonitor: vi.fn(() => Promise.resolve({
+      ...monitor,
+      lifecycle: "paused" as const,
+    })),
+    resumeMonitor: vi.fn(() => Promise.resolve(monitor)),
     listMonitorChecks: vi.fn(() => Promise.resolve(emptyChecks)),
     listIncidents: vi.fn(() => Promise.resolve(emptyIncidents)),
   };
@@ -101,6 +121,92 @@ describe("OpsPulse API", () => {
       service: "api",
       status: "alive",
     });
+  });
+
+  it("serves the operations dashboard shell", async () => {
+    const response = await fetch(`${baseUrl}/`);
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(html).toContain("OpsPulse");
+    expect(html).toContain('id="monitors"');
+    expect(html).toContain('id="recent-checks"');
+    expect(html).toContain('id="open-incidents"');
+    expect(html).toContain("/v1/monitors?limit=50");
+    expect(html).toContain("/v1/incidents?status=open&limit=50");
+    expect(html).toContain("/v1/checks?limit=12");
+    expect(html).toContain("fetchAllPages");
+    expect(html).toContain('aria-live="polite"');
+    expect(html).toContain("if (loading) return");
+    expect(html).not.toContain("'/v1/monitors/' + encodeURIComponent");
+    expect(html).toContain('id="new-monitor"');
+    expect(html).toContain('id="monitor-form"');
+    expect(html).toContain('id="monitor-detail"');
+    expect(html).toContain("openMonitor");
+    expect(html).toContain("runLifecycleCommand");
+    expect(html).toContain("/' + command");
+    expect(html).toContain("badge('paused')");
+    expect(html).toContain("cancelled-internal");
+    expect(html).toContain("view.setAttribute('aria-label', 'View ' + monitor.name)");
+    expect(html).not.toContain("fetchAllPages(monitorPath + '/checks");
+  });
+
+  it("lists monitors through the existing contract", async () => {
+    const response = await fetch(
+      `${baseUrl}/v1/monitors?kind=http&state=pending&lifecycle=active&published=false&cursor=abc&limit=12`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(MonitorListResponseSchema.parse(await response.json())).toEqual(monitors);
+    expect(deps.listMonitors).toHaveBeenCalledWith({
+      kind: "http",
+      state: "pending",
+      lifecycle: "active",
+      published: false,
+      cursor: "abc",
+      limit: 12,
+    });
+  });
+
+  it("gets a monitor by ID through the monitor response contract", async () => {
+    const response = await fetch(`${baseUrl}/v1/monitors/${monitor.id}`);
+
+    expect(response.status).toBe(200);
+    expect(MonitorResponseSchema.parse(await response.json())).toEqual({ monitor });
+    expect(deps.getMonitor).toHaveBeenCalledWith(monitor.id);
+  });
+
+  it("returns not found when a monitor detail is unavailable", async () => {
+    deps.getMonitor = vi.fn(() => Promise.resolve(null));
+
+    const response = await fetch(`${baseUrl}/v1/monitors/${monitor.id}`);
+
+    expect(response.status).toBe(404);
+    expect(ApiErrorSchema.parse(await response.json()).error.code).toBe("not_found");
+  });
+
+  it.each([
+    ["pause", "paused"],
+    ["resume", "active"],
+    ["archive", "archived"],
+  ] as const)("applies the %s lifecycle command", async (command, lifecycle) => {
+    const response = await fetch(`${baseUrl}/v1/monitors/${monitor.id}/${command}`, {
+      method: "POST",
+    });
+    const body = LifecycleCommandResponseSchema.parse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(body.monitor.lifecycle).toBe(lifecycle);
+    expect(deps[`${command}Monitor`]).toHaveBeenCalledWith(monitor.id);
+  });
+
+  it("lists recent checks across monitors through the existing check contract", async () => {
+    const response = await fetch(`${baseUrl}/v1/checks?result=failure&limit=12`);
+
+    expect(response.status).toBe(200);
+    expect(CheckListResponseSchema.parse(await response.json())).toEqual(emptyChecks);
+    expect(deps.listChecks).toHaveBeenCalledWith({ result: "failure", limit: 12 });
   });
 
   it("creates an HTTP monitor with contract defaults", async () => {
@@ -210,6 +316,15 @@ describe("OpsPulse API", () => {
       field: "cursor",
       issue: "Invalid cursor",
     });
+  });
+
+  it("hides check history when the monitor is missing or archived", async () => {
+    deps.getMonitor = vi.fn(() => Promise.resolve(null));
+
+    const response = await fetch(`${baseUrl}/v1/monitors/${monitor.id}/checks`);
+
+    expect(response.status).toBe(404);
+    expect(deps.listMonitorChecks).not.toHaveBeenCalled();
   });
 
   it("validates incident filters before listing", async () => {

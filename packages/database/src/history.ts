@@ -32,7 +32,7 @@ function encodeCursor(cursor: HistoryCursor): string {
   );
 }
 
-function decodeCursor(value: string): HistoryCursor {
+export function decodeHistoryCursor(value: string): HistoryCursor {
   try {
     if (!/^[A-Za-z0-9_-]+$/.test(value)) throw new Error("invalid base64url");
     const parsed: unknown = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
@@ -55,11 +55,21 @@ function decodeCursor(value: string): HistoryCursor {
   }
 }
 
-function cursorForRow(row: unknown, timestampColumn: string, idColumn: string): string {
+export function historyCursorForRow(
+  row: unknown,
+  timestampColumn: string,
+  idColumn: string,
+): string {
   if (typeof row !== "object" || row === null) throw new TypeError("history row is invalid");
   const value = row as Record<string, unknown>;
+  const rawTimestamp = value[timestampColumn];
+  const preciseTimestamp = typeof rawTimestamp === "string"
+    ? TimestampSchema.safeParse(rawTimestamp)
+    : null;
   return encodeCursor({
-    timestamp: pgTimestampToIso(value[timestampColumn], timestampColumn),
+    timestamp: preciseTimestamp?.success === true
+      ? preciseTimestamp.data
+      : pgTimestampToIso(rawTimestamp, timestampColumn),
     id: IdSchema.parse(value[idColumn]),
   });
 }
@@ -69,10 +79,28 @@ export async function listMonitorChecks(
   monitorId: string,
   options: CheckHistoryFilter,
 ): Promise<CheckListResponse> {
-  const id = IdSchema.parse(monitorId);
+  return listChecksQuery(pool, IdSchema.parse(monitorId), options);
+}
+
+export async function listChecks(
+  pool: QueryClient,
+  options: CheckHistoryFilter,
+): Promise<CheckListResponse> {
+  return listChecksQuery(pool, undefined, options);
+}
+
+async function listChecksQuery(
+  pool: QueryClient,
+  monitorId: string | undefined,
+  options: CheckHistoryFilter,
+): Promise<CheckListResponse> {
   const query = CheckListQuerySchema.parse(options);
-  const filters = ["cr.monitor_id = $1"];
-  const values: unknown[] = [id];
+  const filters: string[] = [];
+  const values: unknown[] = [];
+  if (monitorId !== undefined) {
+    values.push(monitorId);
+    filters.push(`cr.monitor_id = $${String(values.length)}`);
+  }
   if (query.result !== undefined) {
     values.push(query.result);
     filters.push(`r.result = $${String(values.length)}`);
@@ -86,7 +114,7 @@ export async function listMonitorChecks(
     filters.push(`cr.scheduled_at <= $${String(values.length)}`);
   }
   if (query.cursor !== undefined) {
-    const cursor = decodeCursor(query.cursor);
+    const cursor = decodeHistoryCursor(query.cursor);
     values.push(cursor.timestamp, cursor.id);
     const timestampParameter = values.length - 1;
     filters.push(
@@ -103,6 +131,7 @@ export async function listMonitorChecks(
       cr.source AS request_source,
       cr.status AS request_status,
       cr.scheduled_at AS request_scheduled_at,
+      to_char(cr.scheduled_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS request_cursor_timestamp,
       cr.terminal_at AS request_terminal_at,
       cr.created_at AS request_created_at,
       r.id AS run_id,
@@ -115,7 +144,7 @@ export async function listMonitorChecks(
       r.evaluated_at AS run_evaluated_at
     FROM check_requests cr
     LEFT JOIN check_runs r ON r.request_id = cr.id
-    WHERE ${filters.join(" AND ")}
+    ${filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`}
     ORDER BY cr.scheduled_at DESC, cr.id DESC
     LIMIT $${String(values.length)}`,
     values,
@@ -126,7 +155,11 @@ export async function listMonitorChecks(
     items: rows.map(toCheckHistoryItem),
     page: {
       nextCursor: hasMore
-        ? cursorForRow(rows[rows.length - 1], "request_scheduled_at", "request_id")
+        ? historyCursorForRow(
+          rows[rows.length - 1],
+          "request_cursor_timestamp",
+          "request_id",
+        )
         : null,
       hasMore,
     },
@@ -157,7 +190,7 @@ export async function listIncidents(
     filters.push(`started_at <= $${String(values.length)}`);
   }
   if (query.cursor !== undefined) {
-    const cursor = decodeCursor(query.cursor);
+    const cursor = decodeHistoryCursor(query.cursor);
     values.push(cursor.timestamp, cursor.id);
     const timestampParameter = values.length - 1;
     filters.push(
@@ -167,7 +200,9 @@ export async function listIncidents(
   values.push(query.limit + 1);
   const where = filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`;
   const result = await pool.query(
-    `SELECT * FROM incidents
+    `SELECT *,
+      to_char(started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS incident_cursor_timestamp
+    FROM incidents
     ${where}
     ORDER BY started_at DESC, id DESC
     LIMIT $${String(values.length)}`,
@@ -179,7 +214,7 @@ export async function listIncidents(
     items: rows.map(toIncident),
     page: {
       nextCursor: hasMore
-        ? cursorForRow(rows[rows.length - 1], "started_at", "id")
+        ? historyCursorForRow(rows[rows.length - 1], "incident_cursor_timestamp", "id")
         : null,
       hasMore,
     },

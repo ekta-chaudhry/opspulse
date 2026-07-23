@@ -4,10 +4,7 @@ import type {
   TransactionPool,
   TransactionQueryResult,
 } from "./transaction.js";
-import {
-  CheckCompletionConflictError,
-  completeHttpCheck,
-} from "./evaluate-monitor.js";
+import { completeHttpCheck } from "./evaluate-monitor.js";
 
 const monitorId = "11111111-1111-4111-8111-111111111111";
 const requestId = "22222222-2222-4222-8222-222222222222";
@@ -141,7 +138,7 @@ describe("HTTP check completion", () => {
       now,
     );
 
-    expect(completed.historyItem.run.result).toBe("failure");
+    expect(completed.historyItem.run?.result).toBe("failure");
     expect(completed.incident).toEqual({
       id: incidentId,
       status: "open",
@@ -272,7 +269,7 @@ describe("HTTP check completion", () => {
       now,
     );
 
-    expect(completed.historyItem.run.id).toBe(runId);
+    expect(completed.historyItem.run?.id).toBe(runId);
     expect(completed.incident).toBeNull();
     expect(client.calls.map(({ text }) => text)).toEqual([
       "BEGIN",
@@ -284,7 +281,7 @@ describe("HTTP check completion", () => {
     expect(client.calls.some(({ text }) => /^\s*(?:INSERT|UPDATE)\b/u.test(text))).toBe(false);
   });
 
-  it("rejects cancelled requests and rolls back", async () => {
+  it("retains a late result for a cancelled request without evaluating it", async () => {
     const client = new FakeTransactionClient([
       { rows: [] },
       {
@@ -293,17 +290,21 @@ describe("HTTP check completion", () => {
           terminal_at: now,
         })],
       },
+      { rows: [{ id: runId }] },
+      { rows: [] },
       { rows: [] },
     ]);
 
-    await expect(
-      completeHttpCheck(
-        poolFor(client),
-        requestId,
-        { result: "success", httpStatus: 204, latencyMs: 1, cause: null },
-        now,
-      ),
-    ).rejects.toBeInstanceOf(CheckCompletionConflictError);
-    expect(client.calls.at(-1)?.text).toBe("ROLLBACK");
+    const result = await completeHttpCheck(
+      poolFor(client),
+      requestId,
+      { result: "success", httpStatus: 204, latencyMs: 1, cause: null },
+      now,
+    );
+
+    expect(result.historyItem.request.status).toBe("cancelled-internal");
+    expect(client.calls[2]?.text).toContain("INSERT INTO check_runs");
+    expect(client.calls[2]?.values?.[0]).toBeNull();
+    expect(client.calls.at(-1)?.text).toBe("COMMIT");
   });
 });

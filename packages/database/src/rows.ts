@@ -4,13 +4,16 @@ import {
   FailureCauseSchema,
   IncidentSchema,
   IncidentSummarySchema,
+  PrivateHeartbeatMonitorSchema,
   PrivateHttpMonitorSchema,
+  type PrivateHeartbeatMonitor,
   type CheckHistoryItem,
   type CheckRequest,
   type FailureCause,
   type Incident,
   type IncidentSummary,
   type PrivateHttpMonitor,
+  type PrivateMonitor,
 } from "@opspulse/contracts";
 
 type PgRow = Record<string, unknown>;
@@ -107,8 +110,7 @@ export function toIncidentSummary(value: unknown): IncidentSummary {
   });
 }
 
-export function toPrivateHttpMonitor(value: unknown): PrivateHttpMonitor {
-  const row = asRow(value);
+function privateMonitorCommon(row: PgRow) {
   const activeIncidentId = row.active_incident_id;
   const activeIncident = activeIncidentId === null
     ? null
@@ -125,9 +127,8 @@ export function toPrivateHttpMonitor(value: unknown): PrivateHttpMonitor {
       ),
     });
 
-  return PrivateHttpMonitorSchema.parse({
+  return {
     id: requiredString(row, "id"),
-    kind: requiredString(row, "kind"),
     name: requiredString(row, "name"),
     state: requiredString(row, "state"),
     lifecycle: requiredString(row, "lifecycle"),
@@ -153,6 +154,16 @@ export function toPrivateHttpMonitor(value: unknown): PrivateHttpMonitor {
     lastEvaluatedCheckAt: nullableTimestamp(row, "last_evaluated_check_at"),
     activeIncident,
     notificationChannelIds: [],
+    createdAt: pgTimestampToIso(row.created_at, "created_at"),
+    updatedAt: pgTimestampToIso(row.updated_at, "updated_at"),
+  };
+}
+
+export function toPrivateHttpMonitor(value: unknown): PrivateHttpMonitor {
+  const row = asRow(value);
+  return PrivateHttpMonitorSchema.parse({
+    ...privateMonitorCommon(row),
+    kind: requiredString(row, "kind"),
     url: requiredString(row, "url"),
     method: requiredString(row, "method"),
     timeoutSeconds: requiredInteger(row, "timeout_seconds"),
@@ -162,9 +173,25 @@ export function toPrivateHttpMonitor(value: unknown): PrivateHttpMonitor {
     },
     headers: parseJson(row.headers, "headers"),
     nextCheckAt: nullableTimestamp(row, "next_check_at"),
-    createdAt: pgTimestampToIso(row.created_at, "created_at"),
-    updatedAt: pgTimestampToIso(row.updated_at, "updated_at"),
   });
+}
+
+export function toPrivateHeartbeatMonitor(value: unknown): PrivateHeartbeatMonitor {
+  const row = asRow(value);
+  return PrivateHeartbeatMonitorSchema.parse({
+    ...privateMonitorCommon(row),
+    kind: requiredString(row, "kind"),
+    gracePeriodSeconds: requiredInteger(row, "grace_period_seconds"),
+    lastHeartbeatAt: nullableTimestamp(row, "last_heartbeat_at"),
+    nextHeartbeatDeadline: nullableTimestamp(row, "next_heartbeat_deadline"),
+  });
+}
+
+export function toPrivateMonitor(value: unknown): PrivateMonitor {
+  const row = asRow(value);
+  return requiredString(row, "kind") === "heartbeat"
+    ? toPrivateHeartbeatMonitor(row)
+    : toPrivateHttpMonitor(row);
 }
 
 export function toCheckRequest(value: unknown, prefix = ""): CheckRequest {
@@ -200,7 +227,14 @@ export function toCheckHistoryItem(value: unknown): CheckHistoryItem {
     });
   }
   if (request.status === "cancelled-internal") {
-    throw new Error("cancelled check history is not supported by the HTTP vertical slice");
+    return CheckHistoryItemSchema.parse({
+      request,
+      run: null,
+      monitoringError: {
+        safeSummary: "Check cancelled after monitor lifecycle changed",
+        recordedAt: request.terminalAt,
+      },
+    });
   }
 
   return CheckHistoryItemSchema.parse({
