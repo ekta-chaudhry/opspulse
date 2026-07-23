@@ -14,6 +14,7 @@ import {
   type RequestOptions,
 } from "node:http";
 import { request as nodeHttpsRequest } from "node:https";
+import { isIP } from "node:net";
 import { isAllowedAddress } from "./address-policy.js";
 
 export type SafeHttpRequest = {
@@ -128,6 +129,9 @@ export function createSafeHttpClient(
         latencyMs: elapsed(dependencies.now, startedAt),
       };
     }
+    const hostname = url.hostname.startsWith("[") && url.hostname.endsWith("]")
+      ? url.hostname.slice(1, -1)
+      : url.hostname;
     const deadlineAt = Date.now() + input.timeoutMs;
 
     let addresses: readonly LookupAddress[];
@@ -147,7 +151,7 @@ export function createSafeHttpClient(
         input.signal.addEventListener("abort", abortHandler, { once: true });
       });
       addresses = await Promise.race([
-        dependencies.lookup(url.hostname),
+        dependencies.lookup(hostname),
         dnsTimeout,
         aborted,
       ]);
@@ -228,7 +232,7 @@ export function createSafeHttpClient(
       };
       const options: RequestOptions = {
         protocol: url.protocol,
-        hostname: url.hostname,
+        hostname,
         ...(url.port === "" ? {} : { port: Number(url.port) }),
         path: `${url.pathname}${url.search}`,
         method: input.method,
@@ -241,7 +245,9 @@ export function createSafeHttpClient(
             callback(null, selected.address, selected.family);
           }
         },
-        ...(url.protocol === "https:" ? { servername: url.hostname } : {}),
+        ...(url.protocol === "https:" && isIP(hostname) === 0
+          ? { servername: hostname }
+          : {}),
       };
       const request = transport(options, (response) => {
         const status = response.statusCode;
