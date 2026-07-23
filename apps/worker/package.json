@@ -1,0 +1,18 @@
+{
+  "name": "@opspulse/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "dev": "pnpm build && node --watch dist/main.js",
+    "start": "node dist/main.js",
+    "typecheck": "pnpm build && pnpm typecheck:tests",
+    "typecheck:tests": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm --workspace-root build && vitest run --root ../.. --config vitest.config.ts apps/worker/src"
+  },
+  "dependencies": {
+    "@opspulse/contracts": "workspace:*",
+    "@opspulse/database": "workspace:*"
+  }
+}
