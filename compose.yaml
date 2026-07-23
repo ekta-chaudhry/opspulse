@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: opspulse
+      POSTGRES_USER: opspulse
+      POSTGRES_PASSWORD: opspulse
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opspulse -d opspulse"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      target: worker
+    command: ["node", "packages/database/dist/migrate.js"]
+    environment:
+      DATABASE_URL: postgresql://opspulse:opspulse@postgres:5432/opspulse
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      target: api
+    environment:
+      DATABASE_URL: postgresql://opspulse:opspulse@postgres:5432/opspulse
+      HOST: 0.0.0.0
+      PORT: "3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 2s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      target: worker
+    environment:
+      DATABASE_URL: postgresql://opspulse:opspulse@postgres:5432/opspulse
+      POLL_INTERVAL_MS: "500"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  smoke:
+    profiles: ["smoke"]
+    build:
+      context: .
+      target: smoke
+    environment:
+      API_URL: http://api:3000
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  postgres-data:

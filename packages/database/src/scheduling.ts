@@ -36,7 +36,7 @@ export async function claimDueHttpCheck(
     await client.query(
       `UPDATE monitors
       SET next_sequence = next_sequence + 1,
-          next_check_at = $2 + interval_seconds * interval '1 second',
+          next_check_at = $2::timestamptz + interval_seconds * interval '1 second',
           updated_at = $2
       WHERE id = $1`,
       [monitor.id, now],

@@ -109,6 +109,7 @@ describe("HTTP check scheduling", () => {
     expect(client.calls[1]?.text).toContain("NOT EXISTS");
     expect(client.calls[1]?.text).toContain("cr.status = 'pending'");
     expect(client.calls[1]?.values).toEqual([now]);
+    expect(client.calls[2]?.text).toContain("$2::timestamptz");
     expect(client.calls[2]?.values).toEqual([monitorId, now]);
     expect(client.calls[3]?.values).toEqual([monitorId, "0", "2", now]);
     expect(client.released).toBe(true);
