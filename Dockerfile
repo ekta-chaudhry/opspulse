@@ -1,6 +1,4 @@
-ARG NODE_VERSION=24.18.0
-
-FROM node:${NODE_VERSION}-bookworm AS toolchain
+FROM node:24.18.0-bookworm@sha256:5711a0d445a1af54af9589066c646df387d1831a608226f4cd694fc59e745059 AS toolchain
 ENV PNPM_HOME=/pnpm
 ENV PATH=${PNPM_HOME}:${PATH}
 RUN corepack enable && corepack prepare pnpm@10.30.3 --activate
@@ -27,7 +25,7 @@ RUN pnpm install --filter @opspulse/api... --prod --frozen-lockfile
 FROM workspace-manifests AS worker-dependencies
 RUN pnpm install --filter @opspulse/worker... --prod --frozen-lockfile
 
-FROM node:${NODE_VERSION}-bookworm AS api
+FROM node:24.18.0-bookworm@sha256:5711a0d445a1af54af9589066c646df387d1831a608226f4cd694fc59e745059 AS api
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=api-dependencies --chown=node:node /app/ ./
@@ -39,7 +37,7 @@ USER node
 EXPOSE 3000
 CMD ["node", "apps/api/dist/server.js"]
 
-FROM node:${NODE_VERSION}-bookworm AS worker
+FROM node:24.18.0-bookworm@sha256:5711a0d445a1af54af9589066c646df387d1831a608226f4cd694fc59e745059 AS worker
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=worker-dependencies --chown=node:node /app/ ./
@@ -50,9 +48,11 @@ COPY --from=build --chown=node:node /app/packages/domain/dist packages/domain/di
 USER node
 CMD ["node", "apps/worker/dist/main.js"]
 
-FROM node:${NODE_VERSION}-bookworm AS smoke
+FROM node:24.18.0-bookworm@sha256:5711a0d445a1af54af9589066c646df387d1831a608226f4cd694fc59e745059 AS smoke
 ENV NODE_ENV=production
 WORKDIR /app
+RUN mkdir /state && chown node:node /state
+COPY --chown=node:node scripts/smoke-state.mjs scripts/smoke-state.mjs
 COPY --chown=node:node scripts/smoke-vertical-slice.mjs scripts/smoke-vertical-slice.mjs
 USER node
 CMD ["node", "scripts/smoke-vertical-slice.mjs"]

@@ -31,7 +31,7 @@ export type PollingLoopOptions = {
   pollIntervalMs: number;
   signal: AbortSignal;
   claim(): Promise<HttpCheckWorkItem | null>;
-  check(workItem: HttpCheckWorkItem): Promise<unknown>;
+  check(workItem: HttpCheckWorkItem, signal: AbortSignal): Promise<unknown>;
   sleep(milliseconds: number): Promise<void>;
   log(entry: LogEntry): void;
 };
@@ -47,6 +47,7 @@ export type WorkerRuntimeDependencies = {
   checkHttpMonitor(
     workItem: HttpCheckWorkItem,
     dependencies: CheckerDependencies,
+    signal?: AbortSignal,
   ): Promise<unknown>;
   execute(input: SafeHttpRequest): Promise<SafeHttpResult>;
   runLoop(options: PollingLoopOptions): Promise<void>;
@@ -103,7 +104,8 @@ export async function runPollingLoop(options: PollingLoopOptions): Promise<void>
         await options.sleep(options.pollIntervalMs);
         continue;
       }
-      await options.check(workItem);
+      await options.check(workItem, options.signal);
+      if (isAborted(options.signal)) break;
       options.log({
         event: "http_check_completed",
         requestId: workItem.request.id,
@@ -123,6 +125,7 @@ export function startWorker(
 ): WorkerRuntime {
   const pool = dependencies.createPool({ connectionString: config.databaseUrl });
   const controller = new AbortController();
+  const requestController = new AbortController();
   const checkerDependencies: CheckerDependencies = {
     execute: (input) => dependencies.execute(input),
     complete: (requestId, outcome) =>
@@ -132,7 +135,12 @@ export function startWorker(
     pollIntervalMs: config.pollIntervalMs,
     signal: controller.signal,
     claim: () => dependencies.claimDueHttpCheck(pool),
-    check: (workItem) => dependencies.checkHttpMonitor(workItem, checkerDependencies),
+    check: (workItem) =>
+      dependencies.checkHttpMonitor(
+        workItem,
+        checkerDependencies,
+        requestController.signal,
+      ),
     sleep: (milliseconds) => dependencies.sleep(milliseconds, controller.signal),
     log: (entry) => {
       dependencies.log(entry);
@@ -145,6 +153,7 @@ export function startWorker(
     done,
     close(reason) {
       controller.abort();
+      if (reason === "internal") requestController.abort();
       closing ??= (async () => {
         try {
           await done;

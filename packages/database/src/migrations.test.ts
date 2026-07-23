@@ -13,6 +13,10 @@ const verticalSliceMigration = MIGRATIONS[0];
 if (verticalSliceMigration === undefined) {
   throw new Error("Expected the vertical slice migration");
 }
+const checkRequestLeasesMigration = MIGRATIONS[1];
+if (checkRequestLeasesMigration === undefined) {
+  throw new Error("Expected the check request leases migration");
+}
 
 class FakeMigrationClient implements MigrationClient {
   readonly calls: QueryCall[] = [];
@@ -47,7 +51,10 @@ const poolFor = (client: FakeMigrationClient) => ({
 });
 
 it("defines ordered migrations with content-derived SHA-256 checksums", () => {
-  expect(MIGRATIONS.map(({ id }) => id)).toEqual(["0001-vertical-slice"]);
+  expect(MIGRATIONS.map(({ id }) => id)).toEqual([
+    "0001-vertical-slice",
+    "0002-check-request-leases",
+  ]);
   for (const migration of MIGRATIONS) {
     expect(migration.checksum).toBe(
       createHash("sha256").update(migration.sql).digest("hex"),
@@ -75,6 +82,7 @@ it("locks, applies, and records pending migrations in one transaction", async ()
     verticalSliceMigration.id,
     verticalSliceMigration.checksum,
   ]);
+  expect(client.calls.some(({ text }) => text === checkRequestLeasesMigration.sql)).toBe(true);
   expect(client.calls.at(-1)).toEqual({ text: "COMMIT", values: undefined });
   expect(client.released).toBe(true);
 });

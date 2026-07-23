@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17-bookworm
+    image: postgres:17-bookworm@sha256:4f736ae292687621d4dbe0d499ffd024a36bd2ee7d8ca6f2ccd4c800f047b394
     environment:
       POSTGRES_DB: opspulse
       POSTGRES_USER: opspulse
@@ -49,6 +49,7 @@ services:
       timeout: 3s
       retries: 15
       start_period: 2s
+    stop_grace_period: 45s
     restart: unless-stopped
 
   worker:
@@ -61,6 +62,7 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+    stop_grace_period: 45s
     restart: unless-stopped
 
   smoke:
@@ -70,6 +72,9 @@ services:
       target: smoke
     environment:
       API_URL: http://api:3000
+      SMOKE_STATE_FILE: /state/vertical-slice.json
+    volumes:
+      - smoke-state:/state
     depends_on:
       api:
         condition: service_healthy
@@ -77,3 +82,4 @@ services:
 
 volumes:
   postgres-data:
+  smoke-state:

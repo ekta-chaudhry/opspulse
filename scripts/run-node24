@@ -9,5 +9,5 @@ exec docker run --rm --init \
   -e PNPM_STORE_DIR=/workspace/.pnpm-store \
   -v "$PWD:/workspace" \
   -w /workspace \
-  node:24.18.0-bookworm \
+  node:24.18.0-bookworm@sha256:5711a0d445a1af54af9589066c646df387d1831a608226f4cd694fc59e745059 \
   sh -lc 'mkdir -p "$PNPM_HOME"; corepack enable pnpm --install-directory "$PNPM_HOME"; export PATH="$PNPM_HOME:$PATH"; printf "%s\n" "export PATH=\"\$PNPM_HOME:\$PATH\"" > "$HOME/.profile"; if [ "$1" = pnpm ]; then shift; exec pnpm "$@"; else exec "$@"; fi' sh "$@"

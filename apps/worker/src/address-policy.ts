@@ -37,6 +37,17 @@ function parseIpv6(address: string): number[] | null {
   return bytes;
 }
 
+function hasPrefix(bytes: number[], prefix: number[], bits: number): boolean {
+  const fullBytes = Math.floor(bits / 8);
+  for (let index = 0; index < fullBytes; index += 1) {
+    if (bytes[index] !== prefix[index]) return false;
+  }
+  const remainingBits = bits % 8;
+  if (remainingBits === 0) return true;
+  const mask = (0xff << (8 - remainingBits)) & 0xff;
+  return ((bytes[fullBytes] ?? 0) & mask) === ((prefix[fullBytes] ?? 0) & mask);
+}
+
 function isAllowedIpv4(address: string): boolean {
   const octets = parseIpv4(address);
   if (octets === null) return false;
@@ -46,8 +57,13 @@ function isAllowedIpv4(address: string): boolean {
   if (a === 169 && b === 254) return false;
   if (a === 172 && b >= 16 && b <= 31) return false;
   if (a === 192 && b === 168) return false;
-  if (a === 192 && b === 0 && (octets[2] ?? 0) === 0) return false;
+  if (a === 192 && b === 0 && ((octets[2] ?? 0) === 0 || (octets[2] ?? 0) === 2)) {
+    return false;
+  }
+  if (a === 192 && b === 88 && (octets[2] ?? 0) === 99) return false;
   if (a === 198 && (b === 18 || b === 19)) return false;
+  if (a === 198 && b === 51 && (octets[2] ?? 0) === 100) return false;
+  if (a === 203 && b === 0 && (octets[2] ?? 0) === 113) return false;
   return a < 224;
 }
 
@@ -62,6 +78,16 @@ function isAllowedIpv6(address: string): boolean {
   if (first === 0xff) return false;
   if ((first & 0xfe) === 0xfc) return false;
   if (first === 0xfe && (second & 0xc0) !== 0) return false;
+
+  if (hasPrefix(bytes, Array.from({ length: 12 }, () => 0), 96)) return false;
+  if (hasPrefix(bytes, [0x00, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0], 96)) {
+    return false;
+  }
+  if (hasPrefix(bytes, [0x00, 0x64, 0xff, 0x9b, 0x00, 0x01], 48)) return false;
+  if (hasPrefix(bytes, [0x01, 0x00, 0, 0, 0, 0, 0, 0], 64)) return false;
+  if (hasPrefix(bytes, [0x20, 0x01, 0x00], 23)) return false;
+  if (hasPrefix(bytes, [0x20, 0x01, 0x0d, 0xb8], 32)) return false;
+  if (hasPrefix(bytes, [0x20, 0x02], 16)) return false;
 
   const isIpv4Mapped =
     bytes.slice(0, 10).every((value) => value === 0) &&

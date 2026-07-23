@@ -15,8 +15,12 @@ export type {
   CompleteHttpCheckResult,
   HttpCheckOutcome,
 } from "./evaluate-monitor.js";
-export { listIncidents, listMonitorChecks } from "./history.js";
-export type { HistoryLimit, IncidentHistoryFilter } from "./history.js";
+export {
+  InvalidHistoryCursorError,
+  listIncidents,
+  listMonitorChecks,
+} from "./history.js";
+export type { CheckHistoryFilter, IncidentHistoryFilter } from "./history.js";
 export { MIGRATIONS, MIGRATION_LOCK_KEY, runMigrations } from "./migrations.js";
 export type { Migration, MigrationClient } from "./migrations.js";
 export { createHttpMonitor, getHttpMonitor } from "./monitors.js";

@@ -31,6 +31,8 @@ const requestRow = (overrides: Record<string, unknown> = {}) => ({
   scheduled_at: now,
   terminal_at: null,
   created_at: now,
+  claim_started_at: now,
+  claim_count: "2",
   ...overrides,
 });
 
@@ -112,7 +114,7 @@ const poolFor = (client: FakeTransactionClient): TransactionPool => ({
 });
 
 describe("HTTP check completion", () => {
-  it("opens an incident and timeline on a threshold-one failure", async () => {
+  it("completes a reclaimed threshold-one failure with one run and incident", async () => {
     const incidentRow = {
       id: incidentId,
       status: "open",
@@ -181,6 +183,12 @@ describe("HTTP check completion", () => {
       now,
       incidentId,
     ]);
+    expect(client.calls.filter(({ text }) => text.includes("INSERT INTO check_runs"))).toHaveLength(
+      1,
+    );
+    expect(client.calls.filter(({ text }) => text.includes("INSERT INTO incidents"))).toHaveLength(
+      1,
+    );
   });
 
   it("records recovery and resolves the active incident atomically", async () => {

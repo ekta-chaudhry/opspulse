@@ -24,7 +24,7 @@ function port(value: string | undefined): number {
 export function parseApiConfig(env: NodeJS.ProcessEnv): ApiConfig {
   return {
     databaseUrl: required(env, "DATABASE_URL"),
-    host: env.HOST?.trim() || "0.0.0.0",
+    host: env.HOST?.trim() || "127.0.0.1",
     port: port(env.PORT),
   };
 }

@@ -4,7 +4,11 @@ import type {
   TransactionPool,
   TransactionQueryResult,
 } from "./transaction.js";
-import { claimDueHttpCheck } from "./scheduling.js";
+import {
+  HTTP_CHECK_LEASE_GRACE_SECONDS,
+  HTTP_CHECK_TIMEOUT_MULTIPLIER,
+  claimDueHttpCheck,
+} from "./scheduling.js";
 
 const monitorId = "11111111-1111-4111-8111-111111111111";
 const requestId = "22222222-2222-4222-8222-222222222222";
@@ -48,6 +52,8 @@ const requestRow = {
   scheduled_at: now,
   terminal_at: null,
   created_at: now,
+  claim_started_at: now,
+  claim_count: "1",
 };
 
 type QueryStep = TransactionQueryResult | Error;
@@ -78,6 +84,7 @@ describe("HTTP check scheduling", () => {
   it("locks one due monitor, advances it, and persists a pending request atomically", async () => {
     const client = new FakeTransactionClient([
       { rows: [] },
+      { rows: [] },
       { rows: [monitorRow] },
       { rows: [] },
       { rows: [requestRow] },
@@ -101,22 +108,77 @@ describe("HTTP check scheduling", () => {
     expect(work?.monitor.kind).toBe("http");
     expect(client.calls.map(({ text }) => text)).toEqual([
       "BEGIN",
+      expect.stringContaining("check_requests cr"),
       expect.stringContaining("FOR UPDATE OF m SKIP LOCKED"),
       expect.stringContaining("UPDATE monitors"),
       expect.stringContaining("INSERT INTO check_requests"),
       "COMMIT",
     ]);
-    expect(client.calls[1]?.text).toContain("NOT EXISTS");
-    expect(client.calls[1]?.text).toContain("cr.status = 'pending'");
-    expect(client.calls[1]?.values).toEqual([now]);
-    expect(client.calls[2]?.text).toContain("$2::timestamptz");
-    expect(client.calls[2]?.values).toEqual([monitorId, now]);
-    expect(client.calls[3]?.values).toEqual([monitorId, "0", "2", now]);
+    expect(client.calls[2]?.text).toContain("NOT EXISTS");
+    expect(client.calls[2]?.text).toContain("cr.status = 'pending'");
+    expect(client.calls[2]?.values).toEqual([now]);
+    expect(client.calls[3]?.text).toContain("$2::timestamptz");
+    expect(client.calls[3]?.values).toEqual([monitorId, now]);
+    expect(client.calls[4]?.text).toContain("claim_started_at");
+    expect(client.calls[4]?.values).toEqual([monitorId, "0", "2", now]);
     expect(client.released).toBe(true);
+  });
+
+  it("reclaims the same stale request before claiming new monitor work", async () => {
+    const reclaimedAt = new Date("2026-07-22T10:01:11.000Z");
+    const reclaimedRow = {
+      ...requestRow,
+      claim_started_at: reclaimedAt,
+      claim_count: "2",
+    };
+    const client = new FakeTransactionClient([
+      { rows: [] },
+      { rows: [{ id: requestId }] },
+      { rows: [reclaimedRow] },
+      { rows: [monitorRow] },
+      { rows: [] },
+    ]);
+
+    const work = await claimDueHttpCheck(poolFor(client), reclaimedAt);
+
+    expect(work?.request.id).toBe(requestId);
+    expect(work?.request.sequence).toBe(2);
+    expect(work?.monitor.id).toBe(monitorId);
+    expect(client.calls[1]?.text).toContain("FOR UPDATE OF cr, m SKIP LOCKED");
+    expect(client.calls[1]?.values).toEqual([
+      reclaimedAt,
+      HTTP_CHECK_TIMEOUT_MULTIPLIER,
+      HTTP_CHECK_LEASE_GRACE_SECONDS,
+    ]);
+    expect(client.calls[2]?.text).toContain("claim_count = claim_count + 1");
+    expect(client.calls[2]?.values).toEqual([requestId, reclaimedAt]);
+    expect(client.calls.some(({ text }) => text.includes("INSERT INTO check_requests"))).toBe(
+      false,
+    );
+  });
+
+  it("does not reclaim a pending request before twice its timeout plus 60 seconds", async () => {
+    const client = new FakeTransactionClient([
+      { rows: [] },
+      { rows: [] },
+      { rows: [] },
+      { rows: [] },
+    ]);
+
+    await expect(claimDueHttpCheck(poolFor(client), now)).resolves.toBeNull();
+
+    expect(client.calls[1]?.text).toContain("$2::integer * m.timeout_seconds + $3::integer");
+    expect(client.calls[1]?.text).toContain("$1::timestamptz - make_interval");
+    expect(client.calls[1]?.values).toEqual([
+      now,
+      HTTP_CHECK_TIMEOUT_MULTIPLIER,
+      HTTP_CHECK_LEASE_GRACE_SECONDS,
+    ]);
   });
 
   it("returns null without writes when no monitor is due", async () => {
     const client = new FakeTransactionClient([
+      { rows: [] },
       { rows: [] },
       { rows: [] },
       { rows: [] },
@@ -125,6 +187,7 @@ describe("HTTP check scheduling", () => {
     await expect(claimDueHttpCheck(poolFor(client), now)).resolves.toBeNull();
     expect(client.calls.map(({ text }) => text)).toEqual([
       "BEGIN",
+      expect.stringContaining("check_requests cr"),
       expect.stringContaining("FOR UPDATE OF m SKIP LOCKED"),
       "COMMIT",
     ]);
@@ -133,6 +196,7 @@ describe("HTTP check scheduling", () => {
   it("rolls back when pending request persistence fails", async () => {
     const failure = new Error("insert failed");
     const client = new FakeTransactionClient([
+      { rows: [] },
       { rows: [] },
       { rows: [monitorRow] },
       { rows: [] },

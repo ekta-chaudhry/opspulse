@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { verticalSliceMigrationSql } from "./migrations/0001-vertical-slice.js";
+import { checkRequestLeasesMigrationSql } from "./migrations/0002-check-request-leases.js";
 import {
   withTransaction,
   type TransactionClient,
@@ -24,6 +25,11 @@ export const MIGRATIONS: readonly Migration[] = [
     id: "0001-vertical-slice",
     sql: verticalSliceMigrationSql,
     checksum: checksum(verticalSliceMigrationSql),
+  },
+  {
+    id: "0002-check-request-leases",
+    sql: checkRequestLeasesMigrationSql,
+    checksum: checksum(checkRequestLeasesMigrationSql),
   },
 ];
 

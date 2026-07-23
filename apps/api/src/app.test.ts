@@ -9,6 +9,7 @@ import {
   type IncidentListResponse,
   type PrivateHttpMonitor,
 } from "@opspulse/contracts";
+import { InvalidHistoryCursorError } from "@opspulse/database";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -185,10 +186,30 @@ describe("OpsPulse API", () => {
     const invalidLimit = await fetch(`${baseUrl}/v1/monitors/${monitor.id}/checks?limit=101`);
     expect(invalidLimit.status).toBe(400);
 
-    const response = await fetch(`${baseUrl}/v1/monitors/${monitor.id}/checks?limit=12`);
+    const response = await fetch(
+      `${baseUrl}/v1/monitors/${monitor.id}/checks?result=failure&from=2026-07-01T00%3A00%3A00.000Z&to=2026-07-22T00%3A00%3A00.000Z&cursor=abc&limit=12`,
+    );
     expect(response.status).toBe(200);
     expect(CheckListResponseSchema.parse(await response.json())).toEqual(emptyChecks);
-    expect(deps.listMonitorChecks).toHaveBeenCalledWith(monitor.id, { limit: 12 });
+    expect(deps.listMonitorChecks).toHaveBeenCalledWith(monitor.id, {
+      result: "failure",
+      from: "2026-07-01T00:00:00.000Z",
+      to: "2026-07-22T00:00:00.000Z",
+      cursor: "abc",
+      limit: 12,
+    });
+
+    deps.listMonitorChecks = vi.fn(() => Promise.reject(new InvalidHistoryCursorError()));
+    const malformedCursor = await fetch(
+      `${baseUrl}/v1/monitors/${monitor.id}/checks?cursor=abc`,
+    );
+    const malformedBody = ApiErrorSchema.parse(await malformedCursor.json());
+    expect(malformedCursor.status).toBe(400);
+    expect(malformedBody.error.code).toBe("invalid_request");
+    expect(malformedBody.error.details).toContainEqual({
+      field: "cursor",
+      issue: "Invalid cursor",
+    });
   });
 
   it("validates incident filters before listing", async () => {
@@ -197,13 +218,16 @@ describe("OpsPulse API", () => {
     expect(ApiErrorSchema.parse(await invalid.json()).error.code).toBe("invalid_request");
 
     const response = await fetch(
-      `${baseUrl}/v1/incidents?monitorId=${monitor.id}&status=open&limit=7`,
+      `${baseUrl}/v1/incidents?monitorId=${monitor.id}&status=open&from=2026-07-01T00%3A00%3A00.000Z&to=2026-07-22T00%3A00%3A00.000Z&cursor=abc&limit=7`,
     );
     expect(response.status).toBe(200);
     expect(IncidentListResponseSchema.parse(await response.json())).toEqual(emptyIncidents);
     expect(deps.listIncidents).toHaveBeenCalledWith({
       monitorId: monitor.id,
       status: "open",
+      from: "2026-07-01T00:00:00.000Z",
+      to: "2026-07-22T00:00:00.000Z",
+      cursor: "abc",
       limit: 7,
     });
   });

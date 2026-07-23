@@ -1,7 +1,11 @@
 /* global console, fetch, process, setTimeout */
 
+import { readFile, writeFile } from "node:fs/promises";
+import { parseSmokeState, validateVerticalSlice } from "./smoke-state.mjs";
+
 const apiUrl = (process.env.API_URL ?? "http://api:3000").replace(/\/$/, "");
-const deadline = Date.now() + 60_000;
+const stateFile = process.env.SMOKE_STATE_FILE ?? "/state/vertical-slice.json";
+const verifyExisting = process.env.VERIFY_EXISTING === "1";
 
 const sleep = (milliseconds) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -15,6 +19,7 @@ async function requestJson(path, init) {
 }
 
 async function waitForLiveness() {
+  const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     try {
       const health = await requestJson("/health/live");
@@ -27,22 +32,15 @@ async function waitForLiveness() {
   throw new Error("API liveness timed out");
 }
 
-async function waitForFailure(monitorId) {
+async function waitForFailure(monitorId, expected) {
+  const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     const checks = await requestJson(`/v1/monitors/${monitorId}/checks?limit=10`);
     const incidents = await requestJson(
       `/v1/incidents?monitorId=${monitorId}&status=open&limit=10`,
     );
-    const completedFailure = checks.items?.find(
-      (item) => item.request?.status === "completed" && item.run?.result === "failure",
-    );
-    if (completedFailure !== undefined && incidents.items?.length === 1) {
-      const incident = incidents.items[0];
-      if (incident.status !== "open" || incident.monitorId !== monitorId) {
-        throw new Error("Open incident did not match the monitor");
-      }
-      return { completedFailure, incident };
-    }
+    const result = validateVerticalSlice(monitorId, checks, incidents, expected);
+    if (result !== null) return result;
     await sleep(250);
   }
   throw new Error("Completed DNS failure and open incident timed out");
@@ -50,6 +48,23 @@ async function waitForFailure(monitorId) {
 
 async function main() {
   await waitForLiveness();
+  if (verifyExisting) {
+    const state = parseSmokeState(await readFile(stateFile, "utf8"));
+    const { completedFailure, incident } = await waitForFailure(state.monitorId, state);
+    console.log(JSON.stringify({
+      mode: "verify-existing",
+      monitorId: state.monitorId,
+      checkRequestId: completedFailure.request.id,
+      checkStatus: completedFailure.request.status,
+      checkResult: completedFailure.run.result,
+      causeCategory: completedFailure.run.cause.category,
+      causeCode: completedFailure.run.cause.code,
+      incidentId: incident.id,
+      incidentStatus: incident.status,
+    }));
+    return;
+  }
+
   const created = await requestJson("/v1/monitors", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -67,11 +82,23 @@ async function main() {
   }
 
   const { completedFailure, incident } = await waitForFailure(monitorId);
+  await writeFile(
+    stateFile,
+    JSON.stringify({
+      monitorId,
+      checkRequestId: completedFailure.request.id,
+      incidentId: incident.id,
+    }),
+    { encoding: "utf8", mode: 0o600 },
+  );
   console.log(JSON.stringify({
+    mode: "initial",
     monitorId,
     checkRequestId: completedFailure.request.id,
     checkStatus: completedFailure.request.status,
     checkResult: completedFailure.run.result,
+    causeCategory: completedFailure.run.cause.category,
+    causeCode: completedFailure.run.cause.code,
     incidentId: incident.id,
     incidentStatus: incident.status,
   }));

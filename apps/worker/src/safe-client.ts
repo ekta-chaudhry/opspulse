@@ -21,7 +21,19 @@ export type SafeHttpRequest = {
   method: HttpMethod;
   timeoutMs: number;
   headers: RequestHeader[];
+  signal?: AbortSignal;
 };
+
+export class SafeHttpRequestAbortedError extends Error {
+  constructor() {
+    super("HTTP check was aborted");
+    this.name = "SafeHttpRequestAbortedError";
+  }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) throw new SafeHttpRequestAbortedError();
+}
 
 export type SafeFailureCategory =
   | "timeout"
@@ -99,6 +111,7 @@ export function createSafeHttpClient(
 ): (input: SafeHttpRequest) => Promise<SafeHttpResult> {
   return async (input) => {
     const startedAt = dependencies.now();
+    throwIfAborted(input.signal);
     let url: URL;
     try {
       url = new URL(OutboundHttpUrlSchema.parse(input.url));
@@ -119,14 +132,27 @@ export function createSafeHttpClient(
 
     let addresses: readonly LookupAddress[];
     let timeoutHandle: NodeJS.Timeout | undefined;
+    let abortHandler: (() => void) | undefined;
     try {
       const dnsTimeout = new Promise<never>((_resolve, reject) => {
         timeoutHandle = setTimeout(() => {
           reject(DNS_TIMEOUT);
         }, Math.max(1, deadlineAt - Date.now()));
       });
-      addresses = await Promise.race([dependencies.lookup(url.hostname), dnsTimeout]);
+      const aborted = new Promise<never>((_resolve, reject) => {
+        if (input.signal === undefined) return;
+        abortHandler = () => {
+          reject(new SafeHttpRequestAbortedError());
+        };
+        input.signal.addEventListener("abort", abortHandler, { once: true });
+      });
+      addresses = await Promise.race([
+        dependencies.lookup(url.hostname),
+        dnsTimeout,
+        aborted,
+      ]);
     } catch (error) {
+      if (error instanceof SafeHttpRequestAbortedError) throw error;
       if (error === DNS_TIMEOUT) {
         return {
           ok: false,
@@ -143,6 +169,9 @@ export function createSafeHttpClient(
       };
     } finally {
       if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+      if (abortHandler !== undefined) {
+        input.signal?.removeEventListener("abort", abortHandler);
+      }
     }
     if (
       addresses.length === 0 ||
@@ -176,14 +205,26 @@ export function createSafeHttpClient(
       };
     }
 
-    return new Promise<SafeHttpResult>((resolve) => {
+    throwIfAborted(input.signal);
+    return new Promise<SafeHttpResult>((resolve, reject) => {
       let settled = false;
       const deadline = { timer: undefined as NodeJS.Timeout | undefined };
+      const cleanup = (): void => {
+        if (deadline.timer !== undefined) clearTimeout(deadline.timer);
+        input.signal?.removeEventListener("abort", onAbort);
+      };
       const finish = (result: SafeHttpResult): void => {
         if (settled) return;
         settled = true;
-        if (deadline.timer !== undefined) clearTimeout(deadline.timer);
+        cleanup();
         resolve(result);
+      };
+      const onAbort = (): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        request.destroy();
+        reject(new SafeHttpRequestAbortedError());
       };
       const options: RequestOptions = {
         protocol: url.protocol,
@@ -236,6 +277,11 @@ export function createSafeHttpClient(
           latencyMs: elapsed(dependencies.now, startedAt),
         });
       });
+      input.signal?.addEventListener("abort", onAbort, { once: true });
+      if (input.signal?.aborted === true) {
+        onAbort();
+        return;
+      }
       request.end();
     });
   };

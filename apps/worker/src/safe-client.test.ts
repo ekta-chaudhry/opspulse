@@ -1,7 +1,10 @@
 import { EventEmitter } from "node:events";
 import type { ClientRequest, IncomingMessage, RequestOptions } from "node:http";
 import { describe, expect, it, vi } from "vitest";
-import { createSafeHttpClient } from "./safe-client.js";
+import {
+  SafeHttpRequestAbortedError,
+  createSafeHttpClient,
+} from "./safe-client.js";
 
 class FakeRequest extends EventEmitter {
   readonly end = vi.fn();
@@ -57,7 +60,7 @@ describe("createSafeHttpClient", () => {
       },
     );
     const client = createSafeHttpClient({
-      lookup: () => Promise.resolve([{ address: "192.0.2.1", family: 4 }]),
+      lookup: () => Promise.resolve([{ address: "93.184.216.34", family: 4 }]),
       httpRequest: transport,
       httpsRequest: transport,
       now: (() => {
@@ -84,7 +87,7 @@ describe("createSafeHttpClient", () => {
         else resolve({ address, family });
       });
     });
-    expect(pinned).toEqual({ address: "192.0.2.1", family: 4 });
+    expect(pinned).toEqual({ address: "93.184.216.34", family: 4 });
     const pinnedAll = await new Promise<readonly { address: string; family: number }[]>(
       (resolve, reject) => {
         options?.lookup?.("example.test", { all: true }, (error, addresses) => {
@@ -94,7 +97,7 @@ describe("createSafeHttpClient", () => {
         });
       },
     );
-    expect(pinnedAll).toEqual([{ address: "192.0.2.1", family: 4 }]);
+    expect(pinnedAll).toEqual([{ address: "93.184.216.34", family: 4 }]);
     expect(request.end).toHaveBeenCalledOnce();
     expect(response.destroy).toHaveBeenCalledOnce();
   });
@@ -111,7 +114,7 @@ describe("createSafeHttpClient", () => {
       return request as unknown as ClientRequest;
     });
     const client = createSafeHttpClient({
-      lookup: () => Promise.resolve([{ address: "2001:db8::1", family: 6 }]),
+      lookup: () => Promise.resolve([{ address: "2606:4700:4700::1111", family: 6 }]),
       httpRequest: transport,
       httpsRequest: transport,
       now: () => 10,
@@ -154,7 +157,7 @@ describe("createSafeHttpClient", () => {
         latencyMs: 0,
       });
 
-      resolveLookup?.([{ address: "192.0.2.1", family: 4 }]);
+      resolveLookup?.([{ address: "93.184.216.34", family: 4 }]);
       await Promise.resolve();
       expect(transport).not.toHaveBeenCalled();
     } finally {
@@ -170,7 +173,7 @@ describe("createSafeHttpClient", () => {
       lookup: () =>
         new Promise((resolve) => {
           setTimeout(() => {
-            resolve([{ address: "192.0.2.1", family: 4 }]);
+            resolve([{ address: "93.184.216.34", family: 4 }]);
           }, 4000);
         }),
       httpRequest: transport,
@@ -193,5 +196,43 @@ describe("createSafeHttpClient", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("aborts DNS resolution without starting a request", async () => {
+    const controller = new AbortController();
+    const transport = vi.fn();
+    const client = createSafeHttpClient({
+      lookup: () => new Promise(() => undefined),
+      httpRequest: transport,
+      httpsRequest: transport,
+      now: () => 0,
+    });
+
+    const result = client({ ...input, signal: controller.signal });
+    controller.abort();
+
+    await expect(result).rejects.toBeInstanceOf(SafeHttpRequestAbortedError);
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it("destroys an in-flight socket when aborted", async () => {
+    const controller = new AbortController();
+    const request = new FakeRequest();
+    const transport = vi.fn(() => request as unknown as ClientRequest);
+    const client = createSafeHttpClient({
+      lookup: () => Promise.resolve([{ address: "93.184.216.34", family: 4 }]),
+      httpRequest: transport,
+      httpsRequest: transport,
+      now: () => 0,
+    });
+
+    const result = client({ ...input, signal: controller.signal });
+    await vi.waitFor(() => {
+      expect(request.end).toHaveBeenCalledOnce();
+    });
+    controller.abort();
+
+    await expect(result).rejects.toBeInstanceOf(SafeHttpRequestAbortedError);
+    expect(request.destroy).toHaveBeenCalledOnce();
   });
 });

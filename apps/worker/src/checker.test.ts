@@ -8,7 +8,10 @@ import type {
 } from "@opspulse/database";
 import { describe, expect, it, vi } from "vitest";
 import { checkHttpMonitor } from "./checker.js";
-import type { SafeHttpResult } from "./safe-client.js";
+import {
+  SafeHttpRequestAbortedError,
+  type SafeHttpResult,
+} from "./safe-client.js";
 
 const monitor: PrivateHttpMonitor = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -142,5 +145,25 @@ describe("checkHttpMonitor", () => {
     if (outcome.cause === null) throw new Error("failure cause was not persisted");
     expect(outcome.cause.safeSummary).toBe("HTTP check failed unexpectedly");
     expect(JSON.stringify(outcome)).not.toContain("secret target detail");
+  });
+
+  it("leaves the request pending when shutdown cancels execution", async () => {
+    const controller = new AbortController();
+    const execute = vi.fn(() => Promise.reject(new SafeHttpRequestAbortedError()));
+    const complete = vi.fn();
+    controller.abort();
+
+    await expect(
+      checkHttpMonitor(workItem, { execute, complete }, controller.signal),
+    ).resolves.toBeUndefined();
+
+    expect(execute).toHaveBeenCalledWith({
+      url: monitor.url,
+      method: monitor.method,
+      timeoutMs: 5000,
+      headers: monitor.headers,
+      signal: controller.signal,
+    });
+    expect(complete).not.toHaveBeenCalled();
   });
 });

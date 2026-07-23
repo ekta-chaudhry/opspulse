@@ -40,7 +40,7 @@ describe("runPollingLoop", () => {
 
     expect(claim).toHaveBeenCalledTimes(2);
     expect(check).toHaveBeenCalledOnce();
-    expect(check).toHaveBeenCalledWith(workItem);
+    expect(check).toHaveBeenCalledWith(workItem, controller.signal);
     expect(log).toHaveBeenCalledWith({
       event: "http_check_completed",
       requestId: workItem.request.id,
@@ -76,6 +76,30 @@ describe("runPollingLoop", () => {
     expect(JSON.stringify(log.mock.calls)).not.toContain("private-db");
     expect(JSON.stringify(log.mock.calls)).not.toContain("secret");
   });
+
+  it("stops cleanly without logging completion when an active check is aborted", async () => {
+    const controller = new AbortController();
+    const check = vi.fn((_item: HttpCheckWorkItem, signal: AbortSignal) => {
+      expect(signal).toBe(controller.signal);
+      controller.abort();
+      return Promise.resolve();
+    });
+    const log = vi.fn();
+
+    await runPollingLoop({
+      pollIntervalMs: 500,
+      signal: controller.signal,
+      claim: vi.fn(() => Promise.resolve(workItem)),
+      check,
+      sleep: vi.fn(() => Promise.resolve()),
+      log,
+    });
+
+    expect(check).toHaveBeenCalledWith(workItem, controller.signal);
+    expect(log).not.toHaveBeenCalledWith(expect.objectContaining({
+      event: "http_check_completed",
+    }));
+  });
 });
 
 describe("startWorker", () => {
@@ -89,7 +113,9 @@ describe("startWorker", () => {
     const checkHttpMonitor = vi.fn(async (
       _item: HttpCheckWorkItem,
       dependencies: CheckerDependencies,
+      signal?: AbortSignal,
     ) => {
+      void signal;
       await dependencies.complete("request-id", {
         result: "success",
         httpStatus: 204,
@@ -125,13 +151,17 @@ describe("startWorker", () => {
     const options = loopOptions;
     if (options === undefined) throw new Error("polling options were not captured");
     await options.claim();
-    await options.check(workItem);
+    await options.check(workItem, options.signal);
 
     expect(createPool).toHaveBeenCalledWith({
       connectionString: "postgresql://localhost/opspulse",
     });
     expect(claimDueHttpCheck).toHaveBeenCalledWith(pool);
-    expect(checkHttpMonitor).toHaveBeenCalledWith(workItem, expect.any(Object));
+    expect(checkHttpMonitor).toHaveBeenCalledWith(
+      workItem,
+      expect.any(Object),
+      expect.any(AbortSignal),
+    );
     expect(completeHttpCheck).toHaveBeenCalledWith(pool, "request-id", {
       result: "success",
       httpStatus: 204,
@@ -142,10 +172,62 @@ describe("startWorker", () => {
 
     const closing = runtime.close("SIGINT");
     expect(options.signal.aborted).toBe(true);
+    const requestSignal = checkHttpMonitor.mock.calls[0]?.[2];
+    expect(requestSignal).toBeInstanceOf(AbortSignal);
+    expect(requestSignal).not.toBe(options.signal);
+    expect(requestSignal?.aborted).toBe(false);
     resolveLoop?.();
     await closing;
     await runtime.close("SIGINT");
     expect(pool.end).toHaveBeenCalledOnce();
     expect(log).toHaveBeenCalledWith({ event: "worker_stopped", signal: "SIGINT" });
+  });
+
+  it("cancels the active request during an internal shutdown", async () => {
+    const pool = {
+      connect: vi.fn(),
+      end: vi.fn(() => Promise.resolve()),
+    };
+    let resolveLoop: (() => void) | undefined;
+    const loopDone = new Promise<void>((resolve) => {
+      resolveLoop = resolve;
+    });
+    let loopOptions: Parameters<typeof runPollingLoop>[0] | undefined;
+    const checkHttpMonitor = vi.fn((
+      _item: HttpCheckWorkItem,
+      _dependencies: CheckerDependencies,
+      signal?: AbortSignal,
+    ) => {
+      void signal;
+      return Promise.resolve();
+    });
+    const dependencies = {
+      createPool: vi.fn(() => pool),
+      claimDueHttpCheck: vi.fn(() => Promise.resolve(workItem)),
+      completeHttpCheck: vi.fn(() => Promise.resolve()),
+      checkHttpMonitor,
+      execute: vi.fn(),
+      runLoop: vi.fn((options: Parameters<typeof runPollingLoop>[0]) => {
+        loopOptions = options;
+        return loopDone;
+      }),
+      sleep: vi.fn(() => Promise.resolve()),
+      log: vi.fn(),
+    } as unknown as WorkerRuntimeDependencies;
+    const runtime = startWorker(
+      { databaseUrl: "postgresql://localhost/opspulse", pollIntervalMs: 500 },
+      dependencies,
+    );
+    const options = loopOptions;
+    if (options === undefined) throw new Error("polling options were not captured");
+    await options.check(workItem, options.signal);
+    const requestSignal = checkHttpMonitor.mock.calls[0]?.[2];
+
+    const closing = runtime.close("internal");
+    expect(options.signal.aborted).toBe(true);
+    expect(requestSignal?.aborted).toBe(true);
+    resolveLoop?.();
+    await closing;
+    expect(pool.end).toHaveBeenCalledOnce();
   });
 });

@@ -14,10 +14,13 @@ import {
   type ApiErrorCode,
   type ApiErrorDetail,
   type CheckListResponse,
+  type CheckListQuery,
   type HttpMonitorInput,
   type IncidentListResponse,
+  type IncidentListQuery,
   type PrivateHttpMonitor,
 } from "@opspulse/contracts";
+import { InvalidHistoryCursorError } from "@opspulse/database";
 import express, {
   type ErrorRequestHandler,
   type Request,
@@ -29,13 +32,9 @@ export type AppDependencies = {
   createHttpMonitor: (input: HttpMonitorInput) => Promise<PrivateHttpMonitor>;
   listMonitorChecks: (
     monitorId: string,
-    options: { limit: number },
+    options: CheckListQuery,
   ) => Promise<CheckListResponse>;
-  listIncidents: (options: {
-    monitorId?: string;
-    status?: "open" | "resolved";
-    limit: number;
-  }) => Promise<IncidentListResponse>;
+  listIncidents: (options: IncidentListQuery) => Promise<IncidentListResponse>;
 };
 
 class ApiHttpError extends Error {
@@ -124,19 +123,14 @@ export function createApp(dependencies: AppDependencies): express.Express {
 
   app.get("/v1/monitors/:monitorId/checks", async (request, response) => {
     const { monitorId } = parse(MonitorIdParamsSchema, request.params);
-    const { limit } = parse(CheckListQuerySchema, request.query);
-    const result = await dependencies.listMonitorChecks(monitorId, { limit });
+    const query = parse(CheckListQuerySchema, request.query);
+    const result = await dependencies.listMonitorChecks(monitorId, query);
     response.json(CheckListResponseSchema.parse(result));
   });
 
   app.get("/v1/incidents", async (request, response) => {
     const query = parse(IncidentListQuerySchema, request.query);
-    const options = {
-      limit: query.limit,
-      ...(query.monitorId === undefined ? {} : { monitorId: query.monitorId }),
-      ...(query.status === undefined ? {} : { status: query.status }),
-    };
-    const result = await dependencies.listIncidents(options);
+    const result = await dependencies.listIncidents(query);
     response.json(IncidentListResponseSchema.parse(result));
   });
 
@@ -148,6 +142,10 @@ export function createApp(dependencies: AppDependencies): express.Express {
     void next;
     const known = error instanceof ApiHttpError
       ? error
+      : error instanceof InvalidHistoryCursorError
+        ? new ApiHttpError("invalid_request", "Request validation failed", [
+          { field: "cursor", issue: "Invalid cursor" },
+        ])
       : isBodyParserError(error)
         ? new ApiHttpError("invalid_request", "Request body is invalid")
         : new ApiHttpError("internal_error", "An internal error occurred");

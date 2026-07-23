@@ -9,6 +9,7 @@ import type {
 } from "@opspulse/database";
 import {
   executeSafeHttp,
+  SafeHttpRequestAbortedError,
   type SafeFailureCategory,
   type SafeHttpRequest,
   type SafeHttpResult,
@@ -77,6 +78,7 @@ function toOutcome(
 export async function checkHttpMonitor(
   workItem: HttpCheckWorkItem,
   dependencies: CheckerDependencies,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   let result: SafeHttpResult;
   try {
@@ -85,8 +87,12 @@ export async function checkHttpMonitor(
       method: workItem.monitor.method,
       timeoutMs: workItem.monitor.timeoutSeconds * 1000,
       headers: workItem.monitor.headers,
+      ...(signal === undefined ? {} : { signal }),
     });
-  } catch {
+  } catch (error) {
+    if (signal?.aborted === true || error instanceof SafeHttpRequestAbortedError) {
+      return undefined;
+    }
     result = { ok: false, category: "unknown", code: null, latencyMs: null };
   }
   const outcome = toOutcome(result, workItem.monitor.acceptedStatus);
