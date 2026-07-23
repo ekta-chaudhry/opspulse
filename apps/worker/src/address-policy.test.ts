@@ -35,6 +35,12 @@ describe("isAllowedAddress", () => {
     "2001::1",
     "2001:db8::1",
     "2002:7f00:1::",
+    "100:0:0:1::1",
+    "1fff:ffff::1",
+    "3fff::1",
+    "3fff:0fff::1",
+    "4000::1",
+    "5f00::1",
   ])("rejects non-public address %s", (address) => {
     expect(isAllowedAddress(address)).toBe(false);
   });
@@ -42,6 +48,8 @@ describe("isAllowedAddress", () => {
   it.each([
     "8.8.8.8",
     "93.184.216.34",
+    "::ffff:8.8.8.8",
+    "2001:4860:4860::8888",
     "2606:4700:4700::1111",
   ])("allows public address %s", (address) => {
     expect(isAllowedAddress(address)).toBe(true);

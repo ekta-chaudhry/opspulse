@@ -70,25 +70,6 @@ function isAllowedIpv4(address: string): boolean {
 function isAllowedIpv6(address: string): boolean {
   const bytes = parseIpv6(address);
   if (bytes === null) return false;
-  const isUnspecified = bytes.every((value) => value === 0);
-  const isLoopback = bytes.slice(0, 15).every((value) => value === 0) && bytes[15] === 1;
-  if (isUnspecified || isLoopback) return false;
-  const first = bytes[0] ?? 0;
-  const second = bytes[1] ?? 0;
-  if (first === 0xff) return false;
-  if ((first & 0xfe) === 0xfc) return false;
-  if (first === 0xfe && (second & 0xc0) !== 0) return false;
-
-  if (hasPrefix(bytes, Array.from({ length: 12 }, () => 0), 96)) return false;
-  if (hasPrefix(bytes, [0x00, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0], 96)) {
-    return false;
-  }
-  if (hasPrefix(bytes, [0x00, 0x64, 0xff, 0x9b, 0x00, 0x01], 48)) return false;
-  if (hasPrefix(bytes, [0x01, 0x00, 0, 0, 0, 0, 0, 0], 64)) return false;
-  if (hasPrefix(bytes, [0x20, 0x01, 0x00], 23)) return false;
-  if (hasPrefix(bytes, [0x20, 0x01, 0x0d, 0xb8], 32)) return false;
-  if (hasPrefix(bytes, [0x20, 0x02], 16)) return false;
-
   const isIpv4Mapped =
     bytes.slice(0, 10).every((value) => value === 0) &&
     bytes[10] === 0xff &&
@@ -96,6 +77,12 @@ function isAllowedIpv6(address: string): boolean {
   if (isIpv4Mapped) {
     return isAllowedIpv4(bytes.slice(12).join("."));
   }
+
+  if (!hasPrefix(bytes, [0x20], 3)) return false;
+  if (hasPrefix(bytes, [0x20, 0x01, 0x00], 23)) return false;
+  if (hasPrefix(bytes, [0x20, 0x01, 0x0d, 0xb8], 32)) return false;
+  if (hasPrefix(bytes, [0x20, 0x02], 16)) return false;
+  if (hasPrefix(bytes, [0x3f, 0xff, 0x00], 20)) return false;
   return true;
 }
 
