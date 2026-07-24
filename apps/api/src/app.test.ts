@@ -76,6 +76,7 @@ function dependencies(): AppDependencies {
       lifecycle: "paused" as const,
     })),
     resumeMonitor: vi.fn(() => Promise.resolve(monitor)),
+    updateMonitor: vi.fn(() => Promise.resolve({ ...monitor, name: "Primary API" })),
     listMonitorChecks: vi.fn(() => Promise.resolve(emptyChecks)),
     listIncidents: vi.fn(() => Promise.resolve(emptyIncidents)),
   };
@@ -150,6 +151,11 @@ describe("OpsPulse API", () => {
     expect(html).toContain("cancelled-internal");
     expect(html).toContain("view.setAttribute('aria-label', 'View ' + monitor.name)");
     expect(html).not.toContain("fetchAllPages(monitorPath + '/checks");
+    expect(html).toContain('id="monitor-status-min"');
+    expect(html).toContain('id="monitor-status-max"');
+    expect(html).toContain('id="monitor-headers"');
+    expect(html).toContain("openMonitorForm(monitor)");
+    expect(html).toContain("method: editingMonitorId ? 'PATCH' : 'POST'");
   });
 
   it("lists monitors through the existing contract", async () => {
@@ -175,6 +181,32 @@ describe("OpsPulse API", () => {
     expect(response.status).toBe(200);
     expect(MonitorResponseSchema.parse(await response.json())).toEqual({ monitor });
     expect(deps.getMonitor).toHaveBeenCalledWith(monitor.id);
+  });
+
+  it("updates a monitor through the existing update contract", async () => {
+    const response = await fetch(`${baseUrl}/v1/monitors/${monitor.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "http", name: "Primary API" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(MonitorResponseSchema.parse(await response.json()).monitor.name).toBe("Primary API");
+    expect(deps.updateMonitor).toHaveBeenCalledWith(monitor.id, {
+      kind: "http",
+      name: "Primary API",
+    });
+  });
+
+  it("rejects empty monitor updates before persistence", async () => {
+    const response = await fetch(`${baseUrl}/v1/monitors/${monitor.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "http" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(deps.updateMonitor).not.toHaveBeenCalled();
   });
 
   it("returns not found when a monitor detail is unavailable", async () => {

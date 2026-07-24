@@ -120,8 +120,8 @@ describe("HTTP check completion", () => {
     };
     const client = new FakeTransactionClient([
       { rows: [] },
-      { rows: [requestRow()] },
       { rows: [monitorRow()] },
+      { rows: [requestRow()] },
       { rows: [{ id: runId }] },
       { rows: [] },
       { rows: [incidentRow] },
@@ -147,8 +147,8 @@ describe("HTTP check completion", () => {
     });
     expect(client.calls.map(({ text }) => text)).toEqual([
       "BEGIN",
-      expect.stringContaining("FROM check_requests"),
       expect.stringContaining("FOR UPDATE OF m"),
+      expect.stringContaining("FROM check_requests"),
       expect.stringContaining("INSERT INTO check_runs"),
       expect.stringContaining("UPDATE check_requests"),
       expect.stringContaining("INSERT INTO incidents"),
@@ -157,7 +157,7 @@ describe("HTTP check completion", () => {
       expect.stringContaining("FROM check_requests cr"),
       "COMMIT",
     ]);
-    expect(client.calls[1]?.text).toContain("FOR UPDATE");
+    expect(client.calls[1]?.text).toContain("FOR UPDATE OF m");
     expect(client.calls[1]?.values).toEqual([requestId]);
     expect(client.calls[5]?.values).toEqual([
       monitorId,
@@ -203,8 +203,8 @@ describe("HTTP check completion", () => {
     });
     const client = new FakeTransactionClient([
       { rows: [] },
-      { rows: [recoveringRequest] },
       { rows: [recoveringMonitor] },
+      { rows: [recoveringRequest] },
       { rows: [{ id: runId }] },
       { rows: [] },
       { rows: [] },
@@ -256,6 +256,7 @@ describe("HTTP check completion", () => {
   it("returns the existing projection without creating another run or incident", async () => {
     const client = new FakeTransactionClient([
       { rows: [] },
+      { rows: [monitorRow()] },
       { rows: [requestRow({ status: "completed", terminal_at: now })] },
       { rows: [completedProjection("failure")] },
       { rows: [] },
@@ -273,6 +274,7 @@ describe("HTTP check completion", () => {
     expect(completed.incident).toBeNull();
     expect(client.calls.map(({ text }) => text)).toEqual([
       "BEGIN",
+      expect.stringContaining("FOR UPDATE OF m"),
       expect.stringContaining("FROM check_requests"),
       expect.stringContaining("FROM check_requests cr"),
       expect.stringContaining("FROM incidents i"),
@@ -284,6 +286,7 @@ describe("HTTP check completion", () => {
   it("retains a late result for a cancelled request without evaluating it", async () => {
     const client = new FakeTransactionClient([
       { rows: [] },
+      { rows: [monitorRow()] },
       {
         rows: [requestRow({
           status: "cancelled-internal",
@@ -303,8 +306,8 @@ describe("HTTP check completion", () => {
     );
 
     expect(result.historyItem.request.status).toBe("cancelled-internal");
-    expect(client.calls[2]?.text).toContain("INSERT INTO check_runs");
-    expect(client.calls[2]?.values?.[0]).toBeNull();
+    expect(client.calls[3]?.text).toContain("INSERT INTO check_runs");
+    expect(client.calls[3]?.values?.[0]).toBeNull();
     expect(client.calls.at(-1)?.text).toBe("COMMIT");
   });
 });

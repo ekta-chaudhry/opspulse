@@ -26,6 +26,7 @@ describe("startApiServer", () => {
     const pauseMonitor = vi.fn(() => Promise.resolve({ marker: "paused" }));
     const resumeMonitor = vi.fn(() => Promise.resolve({ marker: "resumed" }));
     const archiveMonitor = vi.fn(() => Promise.resolve({ marker: "archived" }));
+    const updateMonitor = vi.fn(() => Promise.resolve({ marker: "updated" }));
     const listMonitors = vi.fn(() => Promise.resolve({ marker: "monitors" }));
     const listChecks = vi.fn(() => Promise.resolve({ marker: "recent-checks" }));
     const listMonitorChecks = vi.fn(() => Promise.resolve({ marker: "checks" }));
@@ -44,6 +45,7 @@ describe("startApiServer", () => {
       pauseMonitor,
       resumeMonitor,
       archiveMonitor,
+      updateMonitor,
       listMonitors,
       listChecks,
       listMonitorChecks,
@@ -75,6 +77,7 @@ describe("startApiServer", () => {
     await operations.pauseMonitor("monitor-id");
     await operations.resumeMonitor("monitor-id");
     await operations.archiveMonitor("monitor-id");
+    await operations.updateMonitor("monitor-id", { kind: "http", name: "Primary API" });
     await operations.listMonitors({ limit: 25 });
     await operations.listChecks({ limit: 12 });
     await operations.listMonitorChecks("monitor-id", { limit: 10 });
@@ -84,6 +87,10 @@ describe("startApiServer", () => {
     expect(pauseMonitor).toHaveBeenCalledWith(pool, "monitor-id");
     expect(resumeMonitor).toHaveBeenCalledWith(pool, "monitor-id");
     expect(archiveMonitor).toHaveBeenCalledWith(pool, "monitor-id");
+    expect(updateMonitor).toHaveBeenCalledWith(pool, "monitor-id", {
+      kind: "http",
+      name: "Primary API",
+    });
     expect(listMonitors).toHaveBeenCalledWith(pool, { limit: 25 });
     expect(listChecks).toHaveBeenCalledWith(pool, { limit: 12 });
     expect(listMonitorChecks).toHaveBeenCalledWith(pool, "monitor-id", {

@@ -157,6 +157,17 @@ export async function completeHttpCheck(
 ): Promise<CompleteHttpCheckResult> {
   const id = IdSchema.parse(requestId);
   return withTransaction(pool, async (client) => {
+    const lockedMonitor = await client.query(
+      `SELECT ${HTTP_MONITOR_COLUMNS}
+      FROM monitors m
+      LEFT JOIN incidents i ON i.id = m.active_incident_id
+      WHERE m.id = (
+        SELECT cr.monitor_id FROM check_requests cr WHERE cr.id = $1
+      ) AND m.kind = 'http'
+      FOR UPDATE OF m`,
+      [id],
+    );
+    const monitorRow = lockedMonitor.rows[0];
     const lockedRequest = await client.query(
       `SELECT * FROM check_requests
       WHERE id = $1
@@ -210,16 +221,6 @@ export async function completeHttpCheck(
     if (request.source !== "http_schedule") {
       throw new CheckCompletionConflictError("check request is not an HTTP schedule request");
     }
-
-    const lockedMonitor = await client.query(
-      `SELECT ${HTTP_MONITOR_COLUMNS}
-      FROM monitors m
-      LEFT JOIN incidents i ON i.id = m.active_incident_id
-      WHERE m.id = $1 AND m.kind = 'http'
-      FOR UPDATE OF m`,
-      [request.monitorId],
-    );
-    const monitorRow = lockedMonitor.rows[0];
     if (monitorRow === undefined) {
       throw new CheckCompletionConflictError("HTTP check monitor does not exist");
     }

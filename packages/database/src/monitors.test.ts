@@ -15,6 +15,7 @@ import {
   MonitorLifecycleConflictError,
   pauseMonitor,
   resumeMonitor,
+  updateMonitor,
 } from "./monitors.js";
 
 const monitorId = "11111111-1111-4111-8111-111111111111";
@@ -234,7 +235,7 @@ describe("HTTP monitor persistence", () => {
       next_check_at: null,
       updated_at: new Date("2026-07-22T10:05:00.000Z"),
     };
-    const pool = transactionFor([], [], [row], [], [], [pausedRow], []);
+    const pool = transactionFor([], [row], [], [], [], [pausedRow], []);
 
     const monitor = await pauseMonitor(
       pool,
@@ -249,10 +250,13 @@ describe("HTTP monitor persistence", () => {
     const monitorLockIndex = pool.client.calls.findIndex(({ text }) =>
       text.includes("FROM monitors m") && text.includes("FOR UPDATE OF m")
     );
-    expect(requestLockIndex).toBeGreaterThan(0);
-    expect(requestLockIndex).toBeLessThan(monitorLockIndex);
+    expect(monitorLockIndex).toBeGreaterThan(0);
+    expect(monitorLockIndex).toBeLessThan(requestLockIndex);
     expect(pool.client.calls.some(({ text }) =>
       text.includes("SET status = 'cancelled-internal'")
+    )).toBe(true);
+    expect(pool.client.calls.some(({ text }) =>
+      text.includes("terminal_at = GREATEST($2, created_at)")
     )).toBe(true);
     expect(pool.client.calls.some(({ text }) =>
       text.includes("lifecycle = 'paused'") && text.includes("generation = generation + 1")
@@ -272,7 +276,7 @@ describe("HTTP monitor persistence", () => {
       next_check_at: resumedAt,
       updated_at: resumedAt,
     };
-    const pool = transactionFor([], [], [pausedRow], [], [], [resumedRow], []);
+    const pool = transactionFor([], [pausedRow], [], [], [], [resumedRow], []);
 
     const monitor = await resumeMonitor(pool, monitorId, resumedAt);
 
@@ -310,7 +314,7 @@ describe("HTTP monitor persistence", () => {
       next_check_at: null,
       updated_at: archivedAt,
     };
-    const pool = transactionFor([], [], [openRow], [], [], [], [], [archivedRow], []);
+    const pool = transactionFor([], [openRow], [], [], [], [], [], [archivedRow], []);
 
     const monitor = await archiveMonitor(pool, monitorId, archivedAt);
 
@@ -324,11 +328,109 @@ describe("HTTP monitor persistence", () => {
   });
 
   it("rejects invalid lifecycle transitions without mutating the monitor", async () => {
-    const pool = transactionFor([], [], [{ ...row, lifecycle: "paused" }], []);
+    const pool = transactionFor([], [{ ...row, lifecycle: "paused" }], []);
 
     await expect(pauseMonitor(pool, monitorId, now)).rejects.toBeInstanceOf(
       MonitorLifecycleConflictError,
     );
     expect(pool.client.calls.some(({ text }) => text.startsWith("UPDATE monitors"))).toBe(false);
+  });
+
+  it("updates descriptive fields without changing generation or pending work", async () => {
+    const updatedRow = {
+      ...row,
+      name: "Primary API",
+      failure_threshold: 3,
+      updated_at: new Date("2026-07-22T10:05:00.000Z"),
+    };
+    const pool = transactionFor([], [row], [], [updatedRow], []);
+
+    const monitor = await updateMonitor(
+      pool,
+      monitorId,
+      { kind: "http", name: "Primary API", failureThreshold: 3 },
+      new Date("2026-07-22T10:05:00.000Z"),
+    );
+
+    expect(monitor).toMatchObject({ name: "Primary API", failureThreshold: 3, generation: 0 });
+    expect(pool.client.calls.some(({ text }) =>
+      text.includes("SET status = 'cancelled-internal'")
+    )).toBe(false);
+    const update = pool.client.calls.find(({ text }) => text.startsWith("UPDATE monitors"));
+    expect(update?.values?.at(-1)).toBe(false);
+  });
+
+  it("invalidates pending work and schedules an immediate check for target changes", async () => {
+    const changedAt = new Date("2026-07-22T10:05:00.000Z");
+    const updatedRow = {
+      ...row,
+      url: "https://status.example.com/health",
+      interval_seconds: 120,
+      generation: "1",
+      next_sequence: "1",
+      last_evaluated_sequence: "0",
+      next_check_at: changedAt,
+      updated_at: changedAt,
+    };
+    const pool = transactionFor([], [row], [], [], [], [updatedRow], []);
+
+    const monitor = await updateMonitor(
+      pool,
+      monitorId,
+      {
+        kind: "http",
+        url: "https://status.example.com/health",
+        intervalSeconds: 120,
+      },
+      changedAt,
+    );
+
+    expect(monitor).toMatchObject({ generation: 1, nextSequence: 1, nextCheckAt: changedAt.toISOString() });
+    expect(pool.client.calls.some(({ text }) =>
+      text.includes("SET status = 'cancelled-internal'")
+    )).toBe(true);
+    const update = pool.client.calls.find(({ text }) => text.startsWith("UPDATE monitors"));
+    expect(update?.text).toContain("generation = generation + CASE WHEN");
+    expect(update?.values?.at(-1)).toBe(true);
+    const monitorLockIndex = pool.client.calls.findIndex(({ text }) =>
+      text.includes("FROM monitors m") && text.includes("FOR UPDATE OF m")
+    );
+    const requestLockIndex = pool.client.calls.findIndex(({ text }) =>
+      text.includes("FROM check_requests") && text.includes("FOR UPDATE")
+    );
+    expect(monitorLockIndex).toBeLessThan(requestLockIndex);
+  });
+
+  it("does not schedule paused monitors when scheduling fields change", async () => {
+    const pausedRow = { ...row, lifecycle: "paused", next_check_at: null };
+    const updatedRow = {
+      ...pausedRow,
+      interval_seconds: 120,
+      generation: "1",
+      next_sequence: "1",
+      last_evaluated_sequence: "0",
+      updated_at: new Date("2026-07-22T10:05:00.000Z"),
+    };
+    const pool = transactionFor([], [pausedRow], [], [], [], [updatedRow], []);
+
+    const monitor = await updateMonitor(
+      pool,
+      monitorId,
+      { kind: "http", intervalSeconds: 120 },
+      new Date("2026-07-22T10:05:00.000Z"),
+    );
+
+    expect(monitor).toMatchObject({ lifecycle: "paused", generation: 1, nextCheckAt: null });
+  });
+
+  it("rejects updates whose kind does not match the stored monitor", async () => {
+    const pool = transactionFor([], [row], []);
+
+    await expect(updateMonitor(
+      pool,
+      monitorId,
+      { kind: "heartbeat", gracePeriodSeconds: 90 },
+      now,
+    )).rejects.toBeInstanceOf(MonitorLifecycleConflictError);
   });
 });

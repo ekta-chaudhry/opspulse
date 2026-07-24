@@ -14,6 +14,7 @@ import {
   MonitorListQuerySchema,
   MonitorListResponseSchema,
   MonitorResponseSchema,
+  UpdateMonitorSchema,
   z,
   type ApiErrorCode,
   type ApiErrorDetail,
@@ -26,6 +27,7 @@ import {
   type MonitorListResponse,
   type PrivateHttpMonitor,
   type PrivateMonitor,
+  type UpdateMonitor,
 } from "@opspulse/contracts";
 import {
   InvalidHistoryCursorError,
@@ -53,6 +55,7 @@ export type AppDependencies = {
   listIncidents: (options: IncidentListQuery) => Promise<IncidentListResponse>;
   pauseMonitor: (monitorId: string) => Promise<PrivateMonitor>;
   resumeMonitor: (monitorId: string) => Promise<PrivateMonitor>;
+  updateMonitor: (monitorId: string, input: UpdateMonitor) => Promise<PrivateMonitor>;
 };
 
 class ApiHttpError extends Error {
@@ -160,6 +163,13 @@ export function createApp(dependencies: AppDependencies): express.Express {
     const { monitorId } = parse(MonitorIdParamsSchema, request.params);
     const monitor = await dependencies.getMonitor(monitorId);
     if (monitor === null) throw new ApiHttpError("not_found", "Monitor not found");
+    response.json(MonitorResponseSchema.parse({ monitor }));
+  });
+
+  app.patch("/v1/monitors/:monitorId", async (request, response) => {
+    const { monitorId } = parse(MonitorIdParamsSchema, request.params);
+    const input = parse(UpdateMonitorSchema, request.body);
+    const monitor = await dependencies.updateMonitor(monitorId, input);
     response.json(MonitorResponseSchema.parse({ monitor }));
   });
 

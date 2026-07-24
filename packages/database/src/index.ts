@@ -34,6 +34,7 @@ export {
   MonitorNotFoundError,
   pauseMonitor,
   resumeMonitor,
+  updateMonitor,
 } from "./monitors.js";
 export {
   pgInt8ToSafeInteger,

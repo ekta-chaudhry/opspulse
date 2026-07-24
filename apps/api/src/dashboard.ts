@@ -29,7 +29,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       color: var(--text);
       font: 15px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    button, input, select { font: inherit; }
+    button, input, select, textarea { font: inherit; }
     .shell { width: min(1440px, 100%); margin: 0 auto; padding: 30px clamp(18px, 4vw, 56px) 60px; }
     header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 30px; }
     .brand { display: flex; align-items: center; gap: 11px; margin-bottom: 13px; color: var(--mint); font: 700 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .16em; text-transform: uppercase; }
@@ -87,8 +87,11 @@ export const DASHBOARD_HTML = `<!doctype html>
     .field { display: grid; gap: 7px; }
     .field-wide { grid-column: 1 / -1; }
     label { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
-    input, select { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 10px 11px; background: #0c1215; color: var(--text); }
-    input:focus, select:focus, button:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+    input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 10px 11px; background: #0c1215; color: var(--text); }
+    textarea { min-height: 88px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+    .check-field { display: flex; align-items: center; gap: 9px; align-self: end; min-height: 42px; }
+    .check-field input { width: auto; }
     .form-error { min-height: 22px; margin: 14px 0 0; color: #ff9999; font-size: 13px; }
     .detail-summary { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: start; margin-bottom: 20px; }
     .detail-url { overflow-wrap: anywhere; color: var(--muted); font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -174,8 +177,12 @@ export const DASHBOARD_HTML = `<!doctype html>
         <div class="field"><label for="monitor-method">Method</label><select id="monitor-method" name="method"><option>GET</option><option>HEAD</option></select></div>
         <div class="field"><label for="monitor-interval">Interval seconds</label><input id="monitor-interval" name="intervalSeconds" type="number" min="30" max="86400" value="60" required></div>
         <div class="field"><label for="monitor-timeout">Timeout seconds</label><input id="monitor-timeout" name="timeoutSeconds" type="number" min="1" max="30" value="5" required></div>
+        <div class="field"><label for="monitor-status-min">Minimum accepted status</label><input id="monitor-status-min" name="statusMin" type="number" min="100" max="599" value="200" required></div>
+        <div class="field"><label for="monitor-status-max">Maximum accepted status</label><input id="monitor-status-max" name="statusMax" type="number" min="100" max="599" value="399" required></div>
         <div class="field"><label for="monitor-failures">Failure threshold</label><input id="monitor-failures" name="failureThreshold" type="number" min="1" max="10" value="2" required></div>
         <div class="field"><label for="monitor-recoveries">Recovery threshold</label><input id="monitor-recoveries" name="recoveryThreshold" type="number" min="1" max="10" value="1" required></div>
+        <div class="field field-wide"><label for="monitor-headers">Request headers (JSON)</label><textarea id="monitor-headers" name="headers" spellcheck="false">[]</textarea></div>
+        <label class="check-field field-wide" for="monitor-published"><input id="monitor-published" name="published" type="checkbox"> Publish on the status page</label>
       </div>
       <p id="monitor-form-error" class="form-error" role="status" aria-live="polite"></p>
       <div class="dialog-actions"><button class="secondary" type="button" data-close="monitor-form-dialog">Cancel</button><button class="primary" type="submit">Create monitor</button></div>
@@ -321,6 +328,11 @@ export const DASHBOARD_HTML = `<!doctype html>
       summary.append(identity, monitor.lifecycle === 'paused' ? badge('paused') : badge(monitor.state));
 
       const actions = make('div', 'dialog-actions');
+      if (monitor.kind === 'http') {
+        const edit = make('button', 'secondary', 'Edit monitor');
+        edit.addEventListener('click', () => openMonitorForm(monitor));
+        actions.append(edit);
+      }
       if (monitor.lifecycle === 'active') {
         const pause = make('button', 'secondary', 'Pause monitor');
         pause.addEventListener('click', () => runLifecycleCommand('pause'));
@@ -429,11 +441,33 @@ export const DASHBOARD_HTML = `<!doctype html>
       }
     }
 
-    byId('refresh').addEventListener('click', loadDashboard);
-    byId('new-monitor').addEventListener('click', () => {
+    let editingMonitorId;
+    function openMonitorForm(monitor) {
+      const form = byId('monitor-form');
+      form.reset();
+      editingMonitorId = monitor && monitor.id;
       byId('monitor-form-error').textContent = '';
+      byId('monitor-form-title').textContent = monitor ? 'Edit monitor' : 'Create a monitor';
+      form.querySelector('[type="submit"]').textContent = monitor ? 'Save changes' : 'Create monitor';
+      if (monitor) {
+        form.elements.name.value = monitor.name;
+        form.elements.url.value = monitor.url;
+        form.elements.method.value = monitor.method;
+        form.elements.intervalSeconds.value = String(monitor.intervalSeconds);
+        form.elements.timeoutSeconds.value = String(monitor.timeoutSeconds);
+        form.elements.statusMin.value = String(monitor.acceptedStatus.min);
+        form.elements.statusMax.value = String(monitor.acceptedStatus.max);
+        form.elements.failureThreshold.value = String(monitor.failureThreshold);
+        form.elements.recoveryThreshold.value = String(monitor.recoveryThreshold);
+        form.elements.headers.value = JSON.stringify(monitor.headers, null, 2);
+        form.elements.published.checked = monitor.published;
+        byId('monitor-detail').close();
+      }
       byId('monitor-form-dialog').showModal();
-    });
+    }
+
+    byId('refresh').addEventListener('click', loadDashboard);
+    byId('new-monitor').addEventListener('click', () => openMonitorForm());
     document.querySelectorAll('[data-close]').forEach((button) => {
       button.addEventListener('click', () => byId(button.dataset.close).close());
     });
@@ -445,8 +479,11 @@ export const DASHBOARD_HTML = `<!doctype html>
       submit.disabled = true;
       byId('monitor-form-error').textContent = '';
       try {
-        const created = await fetchJson('/v1/monitors', {
-          method: 'POST',
+        const monitorPath = editingMonitorId
+          ? ['/v1/monitors', encodeURIComponent(editingMonitorId)].join('/')
+          : '/v1/monitors';
+        const saved = await fetchJson(monitorPath, {
+          method: editingMonitorId ? 'PATCH' : 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             kind: 'http',
@@ -455,16 +492,23 @@ export const DASHBOARD_HTML = `<!doctype html>
             method: values.get('method'),
             intervalSeconds: Number(values.get('intervalSeconds')),
             timeoutSeconds: Number(values.get('timeoutSeconds')),
+            acceptedStatus: {
+              min: Number(values.get('statusMin')),
+              max: Number(values.get('statusMax'))
+            },
+            headers: JSON.parse(String(values.get('headers') || '[]')),
             failureThreshold: Number(values.get('failureThreshold')),
-            recoveryThreshold: Number(values.get('recoveryThreshold'))
+            recoveryThreshold: Number(values.get('recoveryThreshold')),
+            published: form.elements.published.checked
           })
         });
         byId('monitor-form-dialog').close();
         form.reset();
+        editingMonitorId = undefined;
         await loadDashboard();
-        await openMonitor(created.monitor.id);
+        await openMonitor(saved.monitor.id);
       } catch (error) {
-        byId('monitor-form-error').textContent = error instanceof Error ? error.message : 'Unable to create monitor';
+        byId('monitor-form-error').textContent = error instanceof Error ? error.message : 'Unable to save monitor';
       } finally {
         submit.disabled = false;
       }

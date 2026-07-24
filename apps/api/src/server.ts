@@ -9,6 +9,7 @@ import {
   getMonitor,
   pauseMonitor,
   resumeMonitor,
+  updateMonitor,
   type DatabasePoolConfig,
   type QueryClient,
   type TransactionPool,
@@ -41,6 +42,7 @@ export type ApiRuntimeDependencies = {
   listMonitors: typeof listMonitors;
   pauseMonitor: typeof pauseMonitor;
   resumeMonitor: typeof resumeMonitor;
+  updateMonitor: typeof updateMonitor;
   listIncidents: typeof listIncidents;
   listen(app: Express, port: number, host: string): Promise<ClosableServer>;
   log(entry: LogEntry): void;
@@ -81,6 +83,7 @@ const defaultDependencies: ApiRuntimeDependencies = {
   listMonitors,
   pauseMonitor,
   resumeMonitor,
+  updateMonitor,
   listIncidents,
   listen,
   log: writeLog,
@@ -111,6 +114,7 @@ export async function startApiServer(
     listIncidents: (options) => dependencies.listIncidents(pool, options),
     pauseMonitor: (monitorId) => dependencies.pauseMonitor(pool, monitorId),
     resumeMonitor: (monitorId) => dependencies.resumeMonitor(pool, monitorId),
+    updateMonitor: (monitorId, input) => dependencies.updateMonitor(pool, monitorId, input),
   });
 
   let server: ClosableServer;

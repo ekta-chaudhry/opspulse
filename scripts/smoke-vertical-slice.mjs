@@ -49,7 +49,7 @@ async function waitForLiveness() {
   throw new Error("API liveness timed out");
 }
 
-async function waitForFailure(monitorId, expected) {
+async function waitForFailure(monitorId, expected, expectedGeneration) {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     const checks = await requestJson(`/v1/monitors/${monitorId}/checks?limit=10`);
@@ -58,6 +58,13 @@ async function waitForFailure(monitorId, expected) {
     );
     const result = validateVerticalSlice(monitorId, checks, incidents, expected);
     if (result !== null) {
+      if (
+        expectedGeneration !== undefined &&
+        result.completedFailure.request.generation !== expectedGeneration
+      ) {
+        await sleep(250);
+        continue;
+      }
       const recentChecks = await requestJson("/v1/checks?limit=100");
       if (recentChecks.items?.some((item) => item.request?.id === result.completedFailure.request.id)) {
         return result;
@@ -88,7 +95,40 @@ async function verifyMonitorManagement() {
   if (detail.monitor?.lifecycle !== "active") {
     throw new Error("New lifecycle smoke monitor was not active");
   }
-  await waitForFailure(monitorId);
+  const initialGeneration = detail.monitor.generation;
+  const descriptivelyUpdated = await requestJson(`/v1/monitors/${monitorId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      kind: "http",
+      name: "Compose edited lifecycle smoke",
+      published: false,
+    }),
+  });
+  if (
+    descriptivelyUpdated.monitor?.name !== "Compose edited lifecycle smoke" ||
+    descriptivelyUpdated.monitor?.generation !== initialGeneration
+  ) {
+    throw new Error("Descriptive monitor update reset scheduled work");
+  }
+  const rescheduled = await requestJson(`/v1/monitors/${monitorId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      kind: "http",
+      url: "http://schedule-change.invalid/",
+      intervalSeconds: 30,
+    }),
+  });
+  if (
+    rescheduled.monitor?.generation !== initialGeneration + 1 ||
+    rescheduled.monitor?.nextSequence !== 1 ||
+    rescheduled.monitor?.lastEvaluatedSequence !== 0 ||
+    typeof rescheduled.monitor?.nextCheckAt !== "string"
+  ) {
+    throw new Error("Schedule-affecting monitor update did not initialize fresh work");
+  }
+  await waitForFailure(monitorId, undefined, rescheduled.monitor.generation);
   const paused = await requestJson(`/v1/monitors/${monitorId}/pause`, { method: "POST" });
   if (paused.monitor?.lifecycle !== "paused") {
     throw new Error("Monitor pause did not persist");

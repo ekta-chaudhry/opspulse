@@ -3,11 +3,13 @@ import {
   IdSchema,
   MonitorListQuerySchema,
   MonitorListResponseSchema,
+  UpdateMonitorSchema,
   type HttpMonitorInput,
   type MonitorListQuery,
   type MonitorListResponse,
   type PrivateHttpMonitor,
   type PrivateMonitor,
+  type UpdateMonitor,
 } from "@opspulse/contracts";
 import type { QueryClient } from "./client.js";
 import { decodeHistoryCursor, historyCursorForRow } from "./history.js";
@@ -143,7 +145,7 @@ async function cancelPendingChecks(
 ): Promise<void> {
   await client.query(
     `UPDATE check_requests
-    SET status = 'cancelled-internal', terminal_at = $2
+    SET status = 'cancelled-internal', terminal_at = GREATEST($2, created_at)
     WHERE monitor_id = $1 AND status = 'pending'`,
     [monitorId, now],
   );
@@ -168,11 +170,11 @@ export async function pauseMonitor(
 ): Promise<PrivateMonitor> {
   const monitorId = IdSchema.parse(id);
   return withTransaction(pool, async (client) => {
-    await lockPendingChecks(client, monitorId);
     const monitor = await lockMonitor(client, monitorId);
     if (monitor.lifecycle !== "active") {
       throw new MonitorLifecycleConflictError("Only active monitors can be paused");
     }
+    await lockPendingChecks(client, monitorId);
     await cancelPendingChecks(client, monitorId, now);
     await client.query(
       `UPDATE monitors
@@ -197,11 +199,11 @@ export async function resumeMonitor(
 ): Promise<PrivateMonitor> {
   const monitorId = IdSchema.parse(id);
   return withTransaction(pool, async (client) => {
-    await lockPendingChecks(client, monitorId);
     const monitor = await lockMonitor(client, monitorId);
     if (monitor.lifecycle !== "paused") {
       throw new MonitorLifecycleConflictError("Only paused monitors can be resumed");
     }
+    await lockPendingChecks(client, monitorId);
     await cancelPendingChecks(client, monitorId, now);
     if (monitor.kind === "http") {
       await client.query(
@@ -248,8 +250,8 @@ export async function archiveMonitor(
 ): Promise<PrivateMonitor> {
   const monitorId = IdSchema.parse(id);
   return withTransaction(pool, async (client) => {
-    await lockPendingChecks(client, monitorId);
     const monitor = await lockMonitor(client, monitorId);
+    await lockPendingChecks(client, monitorId);
     await cancelPendingChecks(client, monitorId, now);
     if (monitor.activeIncident !== null) {
       await client.query(
@@ -281,6 +283,111 @@ export async function archiveMonitor(
           updated_at = $2
       WHERE id = $1`,
       [monitorId, now],
+    );
+    return loadMonitor(client, monitorId);
+  });
+}
+
+function hasScheduleChange(monitor: PrivateMonitor, update: UpdateMonitor): boolean {
+  if (monitor.kind !== update.kind) return false;
+  if (update.intervalSeconds !== undefined && update.intervalSeconds !== monitor.intervalSeconds) {
+    return true;
+  }
+  if (monitor.kind === "heartbeat" && update.kind === "heartbeat") {
+    return update.gracePeriodSeconds !== undefined &&
+      update.gracePeriodSeconds !== monitor.gracePeriodSeconds;
+  }
+  if (monitor.kind === "http" && update.kind === "http") {
+    return (
+      (update.url !== undefined && update.url !== monitor.url) ||
+      (update.method !== undefined && update.method !== monitor.method) ||
+      (update.timeoutSeconds !== undefined && update.timeoutSeconds !== monitor.timeoutSeconds) ||
+      (update.acceptedStatus !== undefined &&
+        (update.acceptedStatus.min !== monitor.acceptedStatus.min ||
+          update.acceptedStatus.max !== monitor.acceptedStatus.max)) ||
+      (update.headers !== undefined &&
+        JSON.stringify(update.headers) !== JSON.stringify(monitor.headers))
+    );
+  }
+  return false;
+}
+
+export async function updateMonitor(
+  pool: TransactionPool,
+  id: string,
+  input: UpdateMonitor,
+  now: Date = new Date(),
+): Promise<PrivateMonitor> {
+  const monitorId = IdSchema.parse(id);
+  const update = UpdateMonitorSchema.parse(input);
+  return withTransaction(pool, async (client) => {
+    const monitor = await lockMonitor(client, monitorId);
+    if (monitor.kind !== update.kind) {
+      throw new MonitorLifecycleConflictError("Monitor kind cannot be changed");
+    }
+    const scheduleChanged = hasScheduleChange(monitor, update);
+    if (scheduleChanged) {
+      await lockPendingChecks(client, monitorId);
+      await cancelPendingChecks(client, monitorId, now);
+    }
+
+    const values: unknown[] = [monitorId, now];
+    const assignments: string[] = [];
+    const assign = (column: string, value: unknown, cast = ""): void => {
+      if (value === undefined) return;
+      values.push(value);
+      assignments.push(`${column} = $${String(values.length)}${cast}`);
+    };
+    assign("name", update.name);
+    assign("published", update.published);
+    assign("interval_seconds", update.intervalSeconds);
+    assign("failure_threshold", update.failureThreshold);
+    assign("recovery_threshold", update.recoveryThreshold);
+    if (update.kind === "http") {
+      assign("url", update.url);
+      assign("method", update.method);
+      assign("timeout_seconds", update.timeoutSeconds);
+      assign("accepted_status_min", update.acceptedStatus?.min);
+      assign("accepted_status_max", update.acceptedStatus?.max);
+      assign(
+        "headers",
+        update.headers === undefined ? undefined : JSON.stringify(update.headers),
+        "::jsonb",
+      );
+    } else {
+      assign("grace_period_seconds", update.gracePeriodSeconds);
+    }
+
+    const heartbeatDelay = update.kind === "heartbeat" && monitor.kind === "heartbeat"
+      ? (update.intervalSeconds ?? monitor.intervalSeconds) +
+        (update.gracePeriodSeconds ?? monitor.gracePeriodSeconds)
+      : 0;
+    values.push(heartbeatDelay);
+    const heartbeatDelayParameter = values.length;
+    values.push(scheduleChanged);
+    const scheduleChangedParameter = values.length;
+    assignments.push(
+      `generation = generation + CASE WHEN $${String(scheduleChangedParameter)}::boolean THEN 1 ELSE 0 END`,
+      `next_sequence = CASE WHEN $${String(scheduleChangedParameter)}::boolean THEN 1 ELSE next_sequence END`,
+      `last_evaluated_sequence = CASE WHEN $${String(scheduleChangedParameter)}::boolean THEN 0 ELSE last_evaluated_sequence END`,
+      `next_check_at = CASE
+        WHEN $${String(scheduleChangedParameter)}::boolean AND kind = 'http' AND lifecycle = 'active' THEN $2
+        WHEN $${String(scheduleChangedParameter)}::boolean AND kind = 'http' THEN NULL
+        ELSE next_check_at
+      END`,
+      `next_heartbeat_deadline = CASE
+        WHEN $${String(scheduleChangedParameter)}::boolean AND kind = 'heartbeat' AND lifecycle = 'active'
+          THEN $2::timestamptz + $${String(heartbeatDelayParameter)}::integer * interval '1 second'
+        WHEN $${String(scheduleChangedParameter)}::boolean AND kind = 'heartbeat' THEN NULL
+        ELSE next_heartbeat_deadline
+      END`,
+      "updated_at = $2",
+    );
+    await client.query(
+      `UPDATE monitors
+      SET ${assignments.join(",\n          ")}
+      WHERE id = $1`,
+      values,
     );
     return loadMonitor(client, monitorId);
   });
