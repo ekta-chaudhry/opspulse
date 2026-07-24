@@ -1,0 +1,27 @@
+{
+  "name": "opspulse",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.30.3",
+  "engines": {
+    "node": "24.18.x"
+  },
+  "scripts": {
+    "clean": "tsc -b --clean && rm -rf coverage",
+    "build": "tsc -b",
+    "lint": "eslint .",
+    "typecheck": "pnpm build && pnpm typecheck:packages",
+    "typecheck:packages": "pnpm -r --if-present typecheck:tests",
+    "test": "pnpm build && pnpm test:unit",
+    "test:unit": "vitest run",
+    "check": "pnpm build && pnpm lint && pnpm typecheck:packages && pnpm test:unit"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.13.3",
+    "eslint": "10.7.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.65.0",
+    "vitest": "4.1.10"
+  }
+}

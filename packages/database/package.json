@@ -1,0 +1,27 @@
+{
+  "name": "@opspulse/database",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "migrate": "node dist/migrate.js",
+    "typecheck": "pnpm build && pnpm typecheck:tests",
+    "typecheck:tests": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm --workspace-root build && vitest run --root ../.. --config vitest.config.ts packages/database/src"
+  },
+  "dependencies": {
+    "@opspulse/contracts": "workspace:*",
+    "@opspulse/domain": "workspace:*",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.20.0"
+  }
+}
