@@ -1,5 +1,6 @@
-/* global structuredClone */
+/* global AbortSignal, structuredClone */
 
+import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
 import {
   API_URL,
@@ -88,6 +89,34 @@ describe("recruiter demo selection", () => {
 });
 
 describe("recruiter demo phases", () => {
+  it("aborts never-resolving loaders at each phase deadline", async () => {
+    const signals = [];
+    const neverResolves = (signal) => {
+      signals.push(signal);
+      return new Promise(() => {});
+    };
+    const outcomes = await Promise.race([
+      Promise.all([
+        waitForLiveness(neverResolves, { timeoutMs: 10 }),
+        createDemoMonitor((_input, signal) => neverResolves(signal), Date.now, {
+          timeoutMs: 10,
+        }),
+        waitForFailedCheck(monitorId, neverResolves, { timeoutMs: 10 }),
+        waitForOpenIncident(monitorId, neverResolves, { timeoutMs: 10 }),
+      ].map((phase) => phase.catch((error) => error.message))),
+      delay(250, null),
+    ]);
+
+    expect(outcomes).toEqual([
+      "API liveness timed out",
+      "Monitor creation failed",
+      "DNS failure timed out",
+      "Open incident timed out",
+    ]);
+    expect(signals).toHaveLength(4);
+    expect(signals.every((signal) => signal instanceof AbortSignal && signal.aborted)).toBe(true);
+  });
+
   it("polls check completion independently with an injected loader", async () => {
     let clock = 0;
     const loadChecks = vi.fn()
@@ -157,13 +186,16 @@ describe("recruiter demo phases", () => {
     const now = () => Date.parse("2026-07-27T12:34:56.789Z");
     const createMonitor = vi.fn().mockResolvedValue({ monitor: { id: monitorId } });
     await expect(createDemoMonitor(createMonitor, now)).resolves.toBe(monitorId);
-    expect(createMonitor).toHaveBeenCalledWith({
-      kind: "http",
-      name: "Resume demo 2026-07-27T12:34:56.789Z",
-      url: "http://does-not-exist.invalid/",
-      method: "GET",
-      failureThreshold: 1,
-    });
+    expect(createMonitor).toHaveBeenCalledWith(
+      {
+        kind: "http",
+        name: "Resume demo 2026-07-27T12:34:56.789Z",
+        url: "http://does-not-exist.invalid/",
+        method: "GET",
+        failureThreshold: 1,
+      },
+      expect.any(AbortSignal),
+    );
 
     await expect(createDemoMonitor(async () => {
       throw new Error("request headers and target leaked");

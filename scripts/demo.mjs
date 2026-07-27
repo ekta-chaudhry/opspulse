@@ -1,4 +1,4 @@
-/* global console, fetch, process, setTimeout */
+/* global AbortController, clearTimeout, console, fetch, process, setTimeout */
 
 import { pathToFileURL } from "node:url";
 
@@ -7,6 +7,22 @@ export const DASHBOARD_URL = process.env.DASHBOARD_URL ?? "http://127.0.0.1:3000
 
 const sleep = (milliseconds) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+async function withDeadline(timeoutMs, timeoutError, operation) {
+  const controller = new AbortController();
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(timeoutError));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([operation(controller.signal), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function responseItems(response, phase) {
   if (typeof response !== "object" || response === null || !Array.isArray(response.items)) {
@@ -63,23 +79,26 @@ async function poll(load, select, timeoutError, {
   now = Date.now,
   sleep: wait = sleep,
 } = {}) {
-  const deadline = now() + timeoutMs;
-  while (true) {
-    let loaded = false;
-    let response;
-    try {
-      response = await load();
-      loaded = true;
-    } catch {
-      // Transient API failures remain private while the bounded poll retries.
+  return withDeadline(timeoutMs, timeoutError, async (signal) => {
+    const deadline = now() + timeoutMs;
+    while (true) {
+      if (signal.aborted) throw new Error(timeoutError);
+      let loaded = false;
+      let response;
+      try {
+        response = await load(signal);
+        loaded = true;
+      } catch {
+        // Transient API failures remain private while the bounded poll retries.
+      }
+      if (loaded) {
+        const result = select(response);
+        if (result !== null) return result;
+      }
+      if (signal.aborted || now() >= deadline) throw new Error(timeoutError);
+      await wait(intervalMs);
     }
-    if (loaded) {
-      const result = select(response);
-      if (result !== null) return result;
-    }
-    if (now() >= deadline) throw new Error(timeoutError);
-    await wait(intervalMs);
-  }
+  });
 }
 
 export function waitForFailedCheck(monitorId, loadChecks, options) {
@@ -106,32 +125,37 @@ export async function waitForLiveness(loadLiveness, {
   now = Date.now,
   sleep: wait = sleep,
 } = {}) {
-  const deadline = now() + timeoutMs;
-  while (true) {
-    try {
-      if ((await loadLiveness())?.status === "alive") return;
-    } catch {
-      // API startup failures remain private while the bounded wait retries.
+  return withDeadline(timeoutMs, "API liveness timed out", async (signal) => {
+    const deadline = now() + timeoutMs;
+    while (true) {
+      if (signal.aborted) throw new Error("API liveness timed out");
+      try {
+        if ((await loadLiveness(signal))?.status === "alive") return;
+      } catch {
+        // API startup failures remain private while the bounded wait retries.
+      }
+      if (signal.aborted || now() >= deadline) throw new Error("API liveness timed out");
+      await wait(intervalMs);
     }
-    if (now() >= deadline) throw new Error("API liveness timed out");
-    await wait(intervalMs);
-  }
+  });
 }
 
-export async function createDemoMonitor(createMonitor, now = Date.now) {
-  try {
-    const response = await createMonitor({
-      kind: "http",
-      name: `Resume demo ${new Date(now()).toISOString()}`,
-      url: "http://does-not-exist.invalid/",
-      method: "GET",
-      failureThreshold: 1,
-    });
-    if (typeof response?.monitor?.id !== "string") throw new Error("invalid response");
-    return response.monitor.id;
-  } catch {
-    throw new Error("Monitor creation failed");
-  }
+export function createDemoMonitor(createMonitor, now = Date.now, { timeoutMs = 60_000 } = {}) {
+  return withDeadline(timeoutMs, "Monitor creation failed", async (signal) => {
+    try {
+      const response = await createMonitor({
+        kind: "http",
+        name: `Resume demo ${new Date(now()).toISOString()}`,
+        url: "http://does-not-exist.invalid/",
+        method: "GET",
+        failureThreshold: 1,
+      }, signal);
+      if (typeof response?.monitor?.id !== "string") throw new Error("invalid response");
+      return response.monitor.id;
+    } catch {
+      throw new Error("Monitor creation failed");
+    }
+  });
 }
 
 async function requestJson(apiUrl, path, init, fetchImpl) {
@@ -159,26 +183,32 @@ export async function runDemo({
   const polling = { timeoutMs, intervalMs, now, sleep: wait };
 
   await waitForLiveness(
-    loadLiveness ?? (() => request("/health/live")),
+    loadLiveness ?? ((signal) => request("/health/live", { signal })),
     polling,
   );
   const monitorId = await createDemoMonitor(
-    createMonitor ?? ((input) => request("/v1/monitors", {
+    createMonitor ?? ((input, signal) => request("/v1/monitors", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),
+      signal,
     })),
     now,
+    { timeoutMs },
   );
   const failedCheck = await waitForFailedCheck(
     monitorId,
-    loadChecks ?? (() => request(`/v1/monitors/${monitorId}/checks?limit=10`)),
+    loadChecks ?? ((signal) => request(
+      `/v1/monitors/${monitorId}/checks?limit=10`,
+      { signal },
+    )),
     polling,
   );
   const incident = await waitForOpenIncident(
     monitorId,
-    loadIncidents ?? (() => request(
+    loadIncidents ?? ((signal) => request(
       `/v1/incidents?monitorId=${monitorId}&status=open&limit=10`,
+      { signal },
     )),
     polling,
   );
