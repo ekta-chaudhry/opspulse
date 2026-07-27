@@ -80,6 +80,20 @@ services:
         condition: service_healthy
     restart: "no"
 
+  demo:
+    profiles: ["demo"]
+    build:
+      context: .
+      target: smoke
+    environment:
+      API_URL: http://api:3000
+      DASHBOARD_URL: http://127.0.0.1:3000
+    command: ["node", "scripts/demo.mjs"]
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: "no"
+
 volumes:
   postgres-data:
   smoke-state:

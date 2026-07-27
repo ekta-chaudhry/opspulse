@@ -52,6 +52,7 @@ FROM node:24.18.0-bookworm@sha256:5711a0d445a1af54af9589066c646df387d1831a608226
 ENV NODE_ENV=production
 WORKDIR /app
 RUN mkdir /state && chown node:node /state
+COPY --chown=node:node scripts/demo.mjs scripts/demo.mjs
 COPY --chown=node:node scripts/smoke-state.mjs scripts/smoke-state.mjs
 COPY --chown=node:node scripts/smoke-vertical-slice.mjs scripts/smoke-vertical-slice.mjs
 USER node
