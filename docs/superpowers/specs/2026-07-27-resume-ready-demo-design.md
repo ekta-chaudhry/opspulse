@@ -14,7 +14,7 @@ The deliverable includes:
 - A repeatable demo command that creates a failing HTTP monitor and waits until its failed check and incident are visible.
 - A basic GitHub Actions workflow running the existing build, lint, typecheck, and unit-test checks.
 - Verification that the documented setup works from a clean checkout.
-- Final resume bullets and repository description text.
+- Final resume wording delivered in the completion response without creating or modifying a resume file.
 
 Authentication, heartbeat monitoring, webhook delivery, public status pages, Redis/BullMQ, Next.js, observability infrastructure, backups, and deployment automation are explicitly excluded.
 
