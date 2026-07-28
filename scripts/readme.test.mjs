@@ -18,8 +18,6 @@ const images = [
   "docs/images/monitor-configuration.png",
   "docs/images/incident-history.png",
 ];
-const automatedTestCount = 540;
-
 function section(readme, heading) {
   const marker = `## ${heading}\n`;
   const start = readme.indexOf(marker);
@@ -49,6 +47,11 @@ describe("README contract", () => {
 
   it("documents the exact host setup and Compose startup commands", () => {
     const quickStart = section(readme, "Quick Start");
+    expect(quickStart).toContain("The only host prerequisite is Docker Engine with Docker Compose.");
+    expect(quickStart).toContain("Node.js 24.18.x and pnpm 10.30.3");
+    expect(quickStart).toMatch(/scripts\/run-node24[^.]+supplies both in a container\./);
+    expect(quickStart).not.toMatch(/Prerequisites are Node\.js|install Node\.js|install pnpm/i);
+    expect(quickStart).not.toMatch(/^curl /m);
     expect(quickStart).toContain("scripts/run-node24 pnpm install --frozen-lockfile");
     expect(quickStart).toContain("docker compose up -d --build --wait postgres migrate api worker");
     expect([...quickStart.matchAll(/docker compose up [^\n]+/g)].map((match) => match[0])).toEqual([
@@ -56,13 +59,30 @@ describe("README contract", () => {
     ]);
   });
 
+  it("models monitor, check, and incident tables inside PostgreSQL", () => {
+    const architecture = section(readme, "Architecture");
+    const diagram = /```mermaid\n([\s\S]*?)```/.exec(architecture)?.[1];
+    expect(diagram, "missing Mermaid architecture diagram").toBeDefined();
+    expect(diagram).toContain("subgraph P[PostgreSQL]");
+    expect(diagram).toContain("M[(monitors)]");
+    expect(diagram).toContain("C[(check requests and runs)]");
+    expect(diagram).toContain("I[(incidents and events)]");
+    expect(diagram).toContain("A -->|Query and mutate| M");
+    expect(diagram).toContain("A -->|Query| C");
+    expect(diagram).toContain("A -->|Query| I");
+    expect(diagram).toMatch(/W -->\|Claim and persist checks\| C/);
+    expect(diagram).toMatch(/W -->\|Evaluate incident state\| I/);
+    expect(diagram).not.toContain("H[Checks and incidents]");
+  });
+
   it("runs the one-shot demo with the exact Compose command", () => {
     expect(section(readme, "Demo")).toContain("docker compose run --rm demo");
   });
 
-  it("states the exact automated test count and runnable verification commands", () => {
+  it("states a durable automated test floor and runnable verification commands", () => {
     const verification = section(readme, "Verification");
-    expect(verification).toContain(`${automatedTestCount} automated tests`);
+    expect(verification).toContain("500+ automated tests");
+    expect(verification).not.toMatch(/\b\d+ automated tests\b/);
     expect(verification).toContain("scripts/run-node24 pnpm test:unit");
     expect(verification).toContain("scripts/run-node24 pnpm check");
     expect(verification).toContain("docker compose run --rm smoke");

@@ -17,13 +17,21 @@ OpsPulse is a self-hosted HTTP monitoring demo that turns scheduled checks into 
 ```mermaid
 flowchart LR
     B[Browser dashboard] -->|HTTP and JSON| A[Express API]
-    A --> P[(PostgreSQL)]
-    W[Worker] -->|Claim due work| P
+    A -->|Dashboard and JSON| B
+
+    subgraph P[PostgreSQL]
+        M[(monitors)]
+        C[(check requests and runs)]
+        I[(incidents and events)]
+    end
+
+    A -->|Query and mutate| M
+    A -->|Query| C
+    A -->|Query| I
+    W[Worker] -->|Read monitor config| M
+    W -->|Claim and persist checks| C
+    W -->|Evaluate incident state| I
     W -->|Run HTTP check| T[Monitored service]
-    W -->|Evaluate result| P
-    P --> H[Checks and incidents]
-    H --> A
-    A --> B
 ```
 
 The Compose stack runs PostgreSQL, a one-shot migration service, the Express API with its static dashboard, and one Node.js worker. PostgreSQL is both the system of record and the worker coordination mechanism.
@@ -47,12 +55,11 @@ The Compose stack runs PostgreSQL, a one-shot migration service, the Express API
 
 ## Quick Start
 
-Prerequisites are Node.js 24.18.0, pnpm 10.30.3, and Docker Engine with Docker Compose. Run host-side Node commands through the checked-in Node 24 wrapper.
+The only host prerequisite is Docker Engine with Docker Compose. The project toolchain is pinned to Node.js 24.18.x and pnpm 10.30.3; `scripts/run-node24` supplies both in a container.
 
 ```sh
 scripts/run-node24 pnpm install --frozen-lockfile
 docker compose up -d --build --wait postgres migrate api worker
-curl --fail --silent --show-error http://127.0.0.1:3000/health/live
 ```
 
 Open [http://127.0.0.1:3000](http://127.0.0.1:3000).
@@ -81,7 +88,7 @@ It creates an HTTP monitor for a deliberately unresolvable host, waits for the w
 
 ## Verification
 
-The repository currently has 540 automated tests. Run the unit suite alone or the full build, lint, typecheck, and test gate:
+The repository is guarded by 500+ automated tests. Run the unit suite alone or the full build, lint, typecheck, and test gate:
 
 ```sh
 scripts/run-node24 pnpm test:unit
