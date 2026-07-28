@@ -1,50 +1,94 @@
 # OpsPulse
 
-OpsPulse is a self-hosted reliability platform for monitoring HTTP services and background jobs.
+OpsPulse is a self-hosted HTTP monitoring demo that turns scheduled checks into durable incident state operators can inspect and act on.
 
-## Status
+![OpsPulse operations dashboard](docs/images/dashboard-overview.png)
 
-The current runnable vertical slice creates and edits HTTP monitors from the operations dashboard, schedules and executes checks, persists filtered cursor-paginated history, opens or resolves incidents in PostgreSQL, and supports monitor detail, pause, resume, and archive workflows. Pending checks use PostgreSQL leases and are reclaimed after `2 * timeoutSeconds + 60s` if a worker exits before completion. The Compose stack includes PostgreSQL, a one-shot migration process, the API, and one worker.
+## What OpsPulse Does
 
-This milestone intentionally uses direct PostgreSQL polling for worker scheduling. Redis, an outbox, authentication, notifications, heartbeat monitoring, and the public status page are still pending. The dashboard and private API endpoints are unauthenticated and are suitable only for local evaluation.
+- Creates and edits HTTP monitors with configurable schedules, timeouts, methods, accepted status ranges, thresholds, and request headers.
+- Runs checks in a separate worker and records latency, HTTP status, and stable failure classifications.
+- Opens and resolves incidents from configurable consecutive-failure and recovery thresholds.
+- Provides an operations dashboard and cursor-paginated JSON APIs for monitors, checks, and incidents.
+- Supports monitor detail, pause, resume, archive, manual refresh, and automatic dashboard refresh.
 
-## Planned Product
+## Architecture
 
-The approved product scope includes HTTP and heartbeat monitoring, incident management, webhook notifications, a private operations dashboard, and a public status page.
+```mermaid
+flowchart LR
+    B[Browser dashboard] -->|HTTP and JSON| A[Express API]
+    A --> P[(PostgreSQL)]
+    W[Worker] -->|Claim due work| P
+    W -->|Run HTTP check| T[Monitored service]
+    W -->|Evaluate result| P
+    P --> H[Checks and incidents]
+    H --> A
+    A --> B
+```
 
-## Prerequisites
+The Compose stack runs PostgreSQL, a one-shot migration service, the Express API with its static dashboard, and one Node.js worker. PostgreSQL is both the system of record and the worker coordination mechanism.
 
-- Node.js 24.18.0
-- pnpm 10.30.3
-- Docker Engine with Docker Compose
+## Reliability Engineering
 
-The API defaults to `127.0.0.1` outside containers. Compose explicitly listens on `0.0.0.0` inside its network but publishes port 3000 only on host loopback. Container base images are pinned to inspected content digests.
+- **Generation-safe edits:** schedule-affecting changes cancel pending work, increment the monitor generation, and reset sequencing so stale results cannot alter current state.
+- **Monitor-first row locking:** lifecycle changes and check completion lock the monitor before pending check rows, giving concurrent transactions a consistent lock order.
+- **Leases and reclamation:** workers claim checks transactionally with `SKIP LOCKED`; abandoned work becomes reclaimable after `2 * timeoutSeconds + 60s`.
+- **Contiguous evaluation:** only the active generation's next sequence can advance counters or incident state.
+- **SSRF defenses:** outbound targets are schema-checked, DNS resolution is bounded, non-public IPv4 and IPv6 ranges are rejected, and the request connects to the approved resolved address.
+- **Archived history:** archiving cancels pending work and resolves an open incident while preserving check and incident records for history queries.
 
-Host-side Node commands should run through the checked-in Node 24 wrapper:
+### Monitor configuration
+
+![HTTP monitor configuration](docs/images/monitor-configuration.png)
+
+### Check and incident history
+
+![Failed check and incident history](docs/images/incident-history.png)
+
+## Quick Start
+
+Prerequisites are Node.js 24.18.0, pnpm 10.30.3, and Docker Engine with Docker Compose. Run host-side Node commands through the checked-in Node 24 wrapper.
 
 ```sh
 scripts/run-node24 pnpm install --frozen-lockfile
-scripts/run-node24 pnpm check
-```
-
-## Run With Compose
-
-Build and start the vertical slice, waiting for the API healthcheck:
-
-```sh
-docker compose build
-docker compose up -d --wait postgres migrate api worker
-```
-
-Check liveness from the host-bound loopback port:
-
-```sh
+docker compose up -d --build --wait postgres migrate api worker
 curl --fail --silent --show-error http://127.0.0.1:3000/health/live
 ```
 
-Open the operations dashboard at [http://127.0.0.1:3000](http://127.0.0.1:3000). It refreshes every 30 seconds and provides HTTP monitor creation and editing, the latest 100 checks and incidents per monitor, pause, resume, archive, and manual refresh controls.
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000).
 
-Run the black-box vertical-slice smoke test inside the Compose network, restart the API and worker without replacing either named volume, and verify the original persisted IDs without creating another monitor:
+Stop and remove containers while preserving PostgreSQL data:
+
+```sh
+docker compose down
+```
+
+Delete PostgreSQL data and smoke-test state when a clean reset is needed:
+
+```sh
+docker compose --profile demo --profile smoke down -v
+```
+
+## Demo
+
+After the stack is running, execute the one-shot demo:
+
+```sh
+docker compose run --rm demo
+```
+
+It creates an HTTP monitor for a deliberately unresolvable host, waits for the worker to classify `dns/ENOTFOUND`, and prints a compact JSON result with the monitor, check, and incident IDs. Inspect the resulting state in the dashboard.
+
+## Verification
+
+The repository currently has 540 automated tests. Run the unit suite alone or the full build, lint, typecheck, and test gate:
+
+```sh
+scripts/run-node24 pnpm test:unit
+scripts/run-node24 pnpm check
+```
+
+The Compose smoke test verifies a fresh vertical slice, then verifies the same persisted IDs after restarting the API and worker without replacing volumes:
 
 ```sh
 docker compose run --rm smoke
@@ -52,22 +96,6 @@ docker compose restart api worker
 docker compose run --rm -e VERIFY_EXISTING=1 smoke
 ```
 
-The smoke state volume contains only the monitor, check-request, and incident UUIDs. The smoke requires the dashboard shell and monitor listing API, a completed `dns` / `ENOTFOUND` failure, exactly one matching open incident, and a second monitor that passes descriptive and schedule-affecting edits, detail, pause, resume, archive, and archive-resolution checks.
+## Current Scope
 
-Stop containers while retaining PostgreSQL data, or remove the data volume as well:
-
-```sh
-docker compose down
-docker compose --profile smoke down -v
-```
-
-## Design Documents
-
-- [Product specification](docs/superpowers/specs/2026-07-21-opspulse-design.md)
-- [Delivery roadmap](docs/superpowers/plans/2026-07-21-opspulse-delivery-roadmap.md)
-- [Foundation roadmap](docs/superpowers/plans/2026-07-21-phase-1-foundation-roadmap.md)
-- [Workspace scaffold plan](docs/superpowers/plans/2026-07-21-phase-1a-workspace-scaffold.md)
-
-## License
-
-No license has been selected yet.
+OpsPulse currently implements local HTTP monitoring only. Authentication, heartbeat monitoring, notifications, and public status pages are not implemented. The dashboard and API are unauthenticated, and Compose publishes the API only on host loopback; this repository is intended for local evaluation rather than production deployment. No license has been selected.
