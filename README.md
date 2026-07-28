@@ -1,6 +1,6 @@
 # OpsPulse
 
-OpsPulse is a self-hosted HTTP monitoring demo that turns scheduled checks into durable incident state operators can inspect and act on.
+OpsPulse is a self-hosted HTTP monitoring platform that turns scheduled checks into durable incident state operators can inspect and act on.
 
 ![OpsPulse operations dashboard](docs/images/dashboard-overview.png)
 
@@ -73,15 +73,15 @@ docker compose down
 Delete PostgreSQL data and smoke-test state when a clean reset is needed:
 
 ```sh
-docker compose --profile demo --profile smoke down -v
+docker compose --profile scenario --profile smoke down -v
 ```
 
-## Demo
+## Failure Scenario
 
-After the stack is running, execute the one-shot demo:
+After the stack is running, execute the one-shot failure scenario:
 
 ```sh
-docker compose run --rm demo
+docker compose run --rm failure-scenario
 ```
 
 It creates an HTTP monitor for a deliberately unresolvable host, waits for the worker to classify `dns/ENOTFOUND`, and prints a compact JSON result with the monitor, check, and incident IDs. Inspect the resulting state in the dashboard.

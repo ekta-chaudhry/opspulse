@@ -5,14 +5,14 @@ import { describe, expect, it, vi } from "vitest";
 import {
   API_URL,
   DASHBOARD_URL,
-  createDemoMonitor,
+  createScenarioMonitor,
   findFailedCheck,
   findOpenIncident,
-  runDemo,
+  runFailureScenario,
   waitForFailedCheck,
   waitForLiveness,
   waitForOpenIncident,
-} from "./demo.mjs";
+} from "./failure-scenario.mjs";
 
 const monitorId = "11111111-1111-4111-8111-111111111111";
 const checkRequestId = "22222222-2222-4222-8222-222222222222";
@@ -36,7 +36,7 @@ const openIncident = {
   items: [{ id: incidentId, monitorId, status: "open" }],
 };
 
-describe("recruiter demo selection", () => {
+describe("failure scenario selection", () => {
   it("selects and sanitizes a completed DNS failure for the created monitor", () => {
     expect(findFailedCheck(monitorId, completedDnsFailure)).toEqual({
       checkRequestId,
@@ -88,7 +88,7 @@ describe("recruiter demo selection", () => {
   });
 });
 
-describe("recruiter demo phases", () => {
+describe("failure scenario phases", () => {
   it("aborts never-resolving loaders at each phase deadline", async () => {
     const signals = [];
     const neverResolves = (signal) => {
@@ -98,7 +98,7 @@ describe("recruiter demo phases", () => {
     const outcomes = await Promise.race([
       Promise.all([
         waitForLiveness(neverResolves, { timeoutMs: 10 }),
-        createDemoMonitor((_input, signal) => neverResolves(signal), Date.now, {
+        createScenarioMonitor((_input, signal) => neverResolves(signal), {
           timeoutMs: 10,
         }),
         waitForFailedCheck(monitorId, neverResolves, { timeoutMs: 10 }),
@@ -183,13 +183,12 @@ describe("recruiter demo phases", () => {
   });
 
   it("creates the required monitor and safely wraps creation failures", async () => {
-    const now = () => Date.parse("2026-07-27T12:34:56.789Z");
     const createMonitor = vi.fn().mockResolvedValue({ monitor: { id: monitorId } });
-    await expect(createDemoMonitor(createMonitor, now)).resolves.toBe(monitorId);
+    await expect(createScenarioMonitor(createMonitor)).resolves.toBe(monitorId);
     expect(createMonitor).toHaveBeenCalledWith(
       {
         kind: "http",
-        name: "Resume demo 2026-07-27T12:34:56.789Z",
+        name: "Payments API",
         url: "http://does-not-exist.invalid/",
         method: "GET",
         failureThreshold: 1,
@@ -197,13 +196,13 @@ describe("recruiter demo phases", () => {
       expect.any(AbortSignal),
     );
 
-    await expect(createDemoMonitor(async () => {
+    await expect(createScenarioMonitor(async () => {
       throw new Error("request headers and target leaked");
-    }, now)).rejects.toMatchObject({ message: "Monitor creation failed" });
+    })).rejects.toMatchObject({ message: "Monitor creation failed" });
   });
 
-  it("returns only the compact safe demo result", async () => {
-    const result = await runDemo({
+  it("returns only the compact safe scenario result", async () => {
+    const result = await runFailureScenario({
       dashboardUrl: "http://dashboard.test",
       loadLiveness: async () => ({ status: "alive" }),
       createMonitor: async () => ({ monitor: { id: monitorId } }),

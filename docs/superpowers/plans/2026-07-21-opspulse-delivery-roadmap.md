@@ -4,7 +4,7 @@ This roadmap preserves the complete approved scope and defines implementation or
 
 **Goal:** Build and self-host the complete OpsPulse reliability platform defined in `docs/superpowers/specs/2026-07-21-opspulse-design.md`.
 
-**Architecture:** A pnpm TypeScript monorepo separates the Express API, background worker roles, Next.js web app, and controllable demo service. PostgreSQL is the source of truth, Redis/BullMQ executes durable outbox work, and shared packages own contracts, domain state transitions, database access, and observability. Work proceeds in vertical phases, but every approved capability remains in the final plan.
+**Architecture:** A pnpm TypeScript monorepo separates the Express API, background worker roles, Next.js web app, and controllable sample service. PostgreSQL is the source of truth, Redis/BullMQ executes durable outbox work, and shared packages own contracts, domain state transitions, database access, and observability. Work proceeds in vertical phases, but every approved capability remains in the final plan.
 
 **Tech Stack:** Node.js 24, TypeScript, pnpm workspaces, Express, Next.js, Zod/OpenAPI, PostgreSQL, Drizzle ORM, Redis, BullMQ, Vitest, Testcontainers, Playwright, OpenTelemetry, Prometheus, Grafana, Docker Compose, Caddy, Cloudflare Tunnel, GitHub Actions.
 
@@ -15,7 +15,7 @@ This roadmap preserves the complete approved scope and defines implementation or
 - `apps/api/`: HTTP API, sessions, monitor management, heartbeat ingestion, public projections, admin CLIs
 - `apps/worker/`: scheduler, checker, outbox dispatcher, notifier, reaper, and worker-heartbeat entry points
 - `apps/web/`: authenticated operations dashboard and public status pages
-- `apps/demo-service/`: deterministic healthy, slow, failing, and webhook-receiver behavior
+- `apps/sample-service/`: deterministic healthy, slow, failing, and webhook-receiver behavior
 - `packages/contracts/`: Zod schemas, OpenAPI registry, API types, webhook payloads
 - `packages/domain/`: pure state machine, deterministic IDs, threshold and ordering rules
 - `packages/database/`: Drizzle schema, SQL migrations, repositories, transactions, outbox
@@ -414,19 +414,19 @@ git commit -m "feat: add durable OpsPulse data model"
 - [ ] Verify no target URL, token, raw error, owner data, or internal identifier leaks.
 - [ ] Commit with `git commit -m "feat: add public service status pages"`.
 
-## Chunk 6: Demonstration, Observability, And Operations
+## Chunk 6: Validation, Observability, And Operations
 
-### Task 18: Create The Controllable Demo Service
+### Task 18: Create The Controllable Sample Service
 
 **Files:**
-- Create: `apps/demo-service/src/server.ts`
-- Create: `apps/demo-service/src/state.ts`
-- Test: `apps/demo-service/src/server.test.ts`
+- Create: `apps/sample-service/src/server.ts`
+- Create: `apps/sample-service/src/state.ts`
+- Test: `apps/sample-service/src/server.test.ts`
 
 - [ ] Write tests for healthy, slow, failing, recovering, retryable webhook, final webhook, and captured signed-header modes.
 - [ ] Implement authenticated local-only control endpoints and public monitored endpoints.
-- [ ] Add a repeatable demo script that drives one complete incident and recovery.
-- [ ] Commit with `git commit -m "feat: add reliability demo service"`.
+- [ ] Add a repeatable failure scenario that drives one complete incident and recovery.
+- [ ] Commit with `git commit -m "feat: add reliability sample service"`.
 
 ### Task 19: Add OpenTelemetry And Metrics
 
@@ -443,7 +443,7 @@ git commit -m "feat: add durable OpsPulse data model"
 - [ ] Write tests for correlation IDs, secret redaction, HTTP-to-BullMQ trace propagation, metric names, bounded labels, and worker heartbeat age.
 - [ ] Instrument API, database, Redis, scheduler, checker, evaluator, and notifier operations.
 - [ ] Add Prometheus scrape and a provisioned Grafana dashboard.
-- [ ] Verify a demo incident is traceable from check request through notification delivery.
+- [ ] Verify a test incident is traceable from check request through notification delivery.
 - [ ] Commit with `git commit -m "feat: add OpsPulse observability"`.
 
 ### Task 20: Containerize The Full Stack
@@ -506,24 +506,24 @@ git commit -m "feat: add durable OpsPulse data model"
 - [ ] Run the complete drill suite twice to prove cleanup and repeatability.
 - [ ] Commit with `git commit -m "test: add production failure drills"`.
 
-### Task 24: Finish Portfolio Documentation
+### Task 24: Finish Project Documentation
 
 **Files:**
 - Modify: `README.md`
 - Create: `docs/architecture.md`
 - Create: `docs/api-examples.md`
 - Create: `docs/self-hosting.md`
-- Create: `docs/demo-script.md`
-- Create: `docs/resume-entry.md`
+- Create: `docs/failure-walkthrough.md`
+- Create: `docs/project-summary.md`
 - Create: `docs/images/*`
 
 - [ ] Document product value, architecture, invariants, setup, self-hosting, security boundary, limitations, and operations.
 - [ ] Add verified commands for HTTP monitor and heartbeat integrations.
 - [ ] Capture dashboard, incident, status-page, tracing, and failure-drill screenshots.
-- [ ] Add a concise live demo script and truthful resume bullets.
+- [ ] Add a concise failure-scenario script and truthful project summary.
 - [ ] Run every README command from a fresh clone.
 - [ ] Run `pnpm check`, integration tests, e2e tests, failure drills, Compose smoke, backup restore, and image scans.
-- [ ] Commit with `git commit -m "docs: complete OpsPulse portfolio presentation"`.
+- [ ] Commit with `git commit -m "docs: complete OpsPulse project presentation"`.
 
 ## Final Verification
 

@@ -140,12 +140,12 @@ export async function waitForLiveness(loadLiveness, {
   });
 }
 
-export function createDemoMonitor(createMonitor, now = Date.now, { timeoutMs = 60_000 } = {}) {
+export function createScenarioMonitor(createMonitor, { timeoutMs = 60_000 } = {}) {
   return withDeadline(timeoutMs, "Monitor creation failed", async (signal) => {
     try {
       const response = await createMonitor({
         kind: "http",
-        name: `Resume demo ${new Date(now()).toISOString()}`,
+        name: "Payments API",
         url: "http://does-not-exist.invalid/",
         method: "GET",
         failureThreshold: 1,
@@ -166,7 +166,7 @@ async function requestJson(apiUrl, path, init, fetchImpl) {
   return response.json();
 }
 
-export async function runDemo({
+export async function runFailureScenario({
   apiUrl = API_URL,
   dashboardUrl = DASHBOARD_URL,
   fetchImpl = fetch,
@@ -186,14 +186,13 @@ export async function runDemo({
     loadLiveness ?? ((signal) => request("/health/live", { signal })),
     polling,
   );
-  const monitorId = await createDemoMonitor(
+  const monitorId = await createScenarioMonitor(
     createMonitor ?? ((input, signal) => request("/v1/monitors", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),
       signal,
     })),
-    now,
     { timeoutMs },
   );
   const failedCheck = await waitForFailedCheck(
@@ -227,10 +226,10 @@ const isDirectExecution = process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isDirectExecution) {
-  runDemo().then((result) => {
+  runFailureScenario().then((result) => {
     console.log(JSON.stringify(result));
   }).catch((error) => {
-    const message = error instanceof Error ? error.message : "Demo failed";
+    const message = error instanceof Error ? error.message : "Failure scenario failed";
     console.error(message);
     process.exitCode = 1;
   });

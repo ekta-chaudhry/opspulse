@@ -9,7 +9,7 @@ const expectedSections = [
   "Architecture",
   "Reliability Engineering",
   "Quick Start",
-  "Demo",
+  "Failure Scenario",
   "Verification",
   "Current Scope",
 ];
@@ -17,6 +17,16 @@ const images = [
   "docs/images/dashboard-overview.png",
   "docs/images/monitor-configuration.png",
   "docs/images/incident-history.png",
+];
+const productPresentationFiles = [
+  "README.md",
+  "Dockerfile",
+  "compose.yaml",
+  "scripts/failure-scenario.mjs",
+  "scripts/failure-scenario.test.mjs",
+  "scripts/compose-runtime.test.mjs",
+  "docs/superpowers/specs/2026-07-21-opspulse-design.md",
+  "docs/superpowers/plans/2026-07-21-opspulse-delivery-roadmap.md",
 ];
 function section(readme, heading) {
   const marker = `## ${heading}\n`;
@@ -34,7 +44,7 @@ describe("README contract", () => {
     readme = await readFile(new URL("README.md", root), "utf8");
   });
 
-  it("presents the required sections in recruiter reading order", () => {
+  it("presents the required sections in product reading order", () => {
     expect([...readme.matchAll(/^## (.+)$/gm)].map((match) => match[1])).toEqual(expectedSections);
   });
 
@@ -75,8 +85,10 @@ describe("README contract", () => {
     expect(diagram).not.toContain("H[Checks and incidents]");
   });
 
-  it("runs the one-shot demo with the exact Compose command", () => {
-    expect(section(readme, "Demo")).toContain("docker compose run --rm demo");
+  it("runs the failure scenario with the exact Compose command", () => {
+    expect(section(readme, "Failure Scenario")).toContain(
+      "docker compose run --rm failure-scenario",
+    );
   });
 
   it("states a durable automated test floor and runnable verification commands", () => {
@@ -97,5 +109,16 @@ describe("README contract", () => {
     );
     expect(readme).not.toMatch(/^## (?:Status|Planned Product|Roadmap)$/m);
     expect(readme).not.toMatch(/\[!\[[^\]]*(?:CI|build)[^\]]*\]/i);
+    expect(readme).not.toMatch(/\b(?:demo|recruiter|resume-ready)\b/i);
+  });
+
+  it("keeps repository presentation language product-focused", async () => {
+    const files = await Promise.all(productPresentationFiles.map(async (file) => ({
+      file,
+      content: await readFile(new URL(file, root), "utf8"),
+    })));
+    for (const { file, content } of files) {
+      expect(content, file).not.toMatch(/\b(?:demo|recruiter|resume-ready|portfolio)\b/i);
+    }
   });
 });

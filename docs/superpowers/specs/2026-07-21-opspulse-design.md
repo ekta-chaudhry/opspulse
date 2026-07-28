@@ -4,7 +4,7 @@
 
 OpsPulse is a self-hosted reliability platform for monitoring HTTP services and background jobs. It detects failures, manages incident state, sends retryable webhook notifications, and exposes both a private operations dashboard and a public status page.
 
-The project is a standalone portfolio product. It is not part of the Production Platform Journey repository, although that learning journey may later improve how OpsPulse is deployed and operated.
+The project is a standalone reliability product. It is not part of the Production Platform Journey repository, although that learning journey may later improve how OpsPulse is deployed and operated.
 
 ## Product Scope
 
@@ -22,7 +22,7 @@ The product includes:
 - Incident history with an append-only timeline
 - Configurable generic webhook notifications
 - API documentation and example HTTP and heartbeat integrations
-- A deliberately unreliable sample service for demonstrations and end-to-end tests
+- A deliberately unreliable sample service for controlled failure scenarios and end-to-end tests
 - Self-monitoring that shows whether the checking worker is healthy
 
 ## Non-Goals
@@ -70,7 +70,7 @@ The repository contains these units:
 - `apps/api`: authentication, monitor management, heartbeat ingestion, incidents, public status, and internal health endpoints
 - `apps/worker`: HTTP checks, missed-heartbeat evaluation, monitor state transitions, retries, and notification delivery
 - `apps/web`: private dashboard and public status pages
-- `apps/demo-service`: controllable healthy, slow, and failing HTTP behavior for demonstrations
+- `apps/sample-service`: controllable healthy, slow, and failing HTTP behavior for validation
 - `packages/contracts`: shared API schemas, domain types, and event payloads
 - `packages/domain`: pure state evaluation, transition invariants, deterministic identifiers, and webhook payload construction
 - `packages/database`: database schema, migrations, and transaction helpers
@@ -413,7 +413,7 @@ Trace context propagates through HTTP requests and BullMQ jobs. A Grafana dashbo
 - API tests cover authentication, authorization, monitor management, heartbeat idempotency, validation, and public-data filtering.
 - Integration tests use real PostgreSQL and Redis containers for transactions, constraints, queues, and retries.
 - Worker tests cover HTTP outcomes, timeouts, missed heartbeats, internal retries, dead-letter handling, and notification replay.
-- End-to-end tests drive the demo service through healthy, slow, failing, and recovered states and verify the dashboard-visible incident lifecycle.
+- End-to-end tests drive the sample service through healthy, slow, failing, and recovered states and verify the dashboard-visible incident lifecycle.
 - Security tests cover rate limits, secret redaction, token handling, and unsafe monitor targets.
 
 Failure drills have explicit pass criteria:
@@ -427,13 +427,13 @@ Failure drills have explicit pass criteria:
 | Webhook failure | Return retryable failures then success | Attempts and backoff are recorded, one delivery eventually succeeds |
 | Duplicate job | Enqueue the same event ID repeatedly | One check or delivery result and one domain transition exist |
 | Stale result | Delay an old-generation check past a newer result | Stale result is stored or classified but cannot change monitor state |
-| Service recovery | Move demo service from failing to healthy | Thresholds resolve one incident and send one recovery event |
+| Service recovery | Move sample service from failing to healthy | Thresholds resolve one incident and send one recovery event |
 
 Automated drills assert database rows, queue state, emitted telemetry, public status, and eventual recovery. The repository also documents manual commands for a reviewer to reproduce each drill.
 
 ## Self-Hosting And Delivery
 
-Docker Compose runs the web, API, worker, demo service, PostgreSQL, Redis, reverse proxy, OpenTelemetry collector, Prometheus, and Grafana components.
+Docker Compose runs the web, API, worker, sample service, PostgreSQL, Redis, reverse proxy, OpenTelemetry collector, Prometheus, and Grafana components.
 
 Caddy provides reverse proxy configuration and TLS. A free Cloudflare Tunnel can expose the application from a local Linux host without opening a router port. The deployment remains portable to a small VPS later.
 
@@ -441,7 +441,7 @@ Required configuration includes database and Redis URLs, public origins, session
 
 PostgreSQL, Redis, Prometheus, and Grafana use named persistent volumes. Only Caddy or Cloudflare Tunnel exposes public ports; databases, Redis, telemetry backends, and internal health endpoints stay on private Compose networks. Services retry dependencies with bounded startup backoff. A one-shot migration service runs before API and worker startup.
 
-The full local stack targets a Linux host with at least 2 CPU cores, 4 GiB RAM, and 10 GiB free storage. A reduced application profile may omit Prometheus and Grafana for development, but the portfolio deployment includes them.
+The full local stack targets a Linux host with at least 2 CPU cores, 4 GiB RAM, and 10 GiB free storage. A reduced application profile may omit Prometheus and Grafana for development, but the full deployment includes them.
 
 GitHub Actions runs static checks, unit tests, integration tests, image builds, and security scans before publishing immutable commit-SHA and release-tag container images. Deployment is a protected manual workflow that connects to the self-hosted machine, writes only approved image tags, runs the backup and migration jobs, pulls images, and performs `docker compose up`. Health checks gate completion.
 
@@ -449,18 +449,18 @@ Migrations are forward-only and backward-compatible with the previous applicatio
 
 PostgreSQL receives an encrypted daily `pg_dump`, retaining seven daily and four weekly backups. Backups are stored outside the database volume and may be copied to an owner-provided S3-compatible bucket. A monthly restore drill loads the newest backup into a temporary database and must pass schema-version, row-count, owner-login, monitor-list, and incident-history smoke checks.
 
-## Portfolio Evidence
+## Project Evidence
 
 The public repository will include:
 
-- A concise product README with screenshots and a live-demo link
+- A concise product README with screenshots and a live environment link
 - Architecture and data-flow diagrams
 - Local and self-hosted setup instructions
 - API examples for HTTP monitors and heartbeat integrations
 - Documented reliability invariants and failure drills
 - CI status, test, and container-image links
-- A short demo script showing failure detection, alert delivery, recovery, and the public status page
+- A short failure-scenario script showing failure detection, alert delivery, recovery, and the public status page
 
-A truthful resume description can state:
+A concise project summary can state:
 
 > Built and self-hosted a TypeScript reliability platform for HTTP services and background jobs, with idempotent incident transitions, retryable webhook delivery, public status pages, distributed tracing, CI/CD, and tested failure recovery.
