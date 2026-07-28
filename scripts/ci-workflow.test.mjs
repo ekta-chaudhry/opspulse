@@ -94,7 +94,7 @@ describe("CI workflow contract", () => {
     expect(onlyValue(check, "runs-on", 4)).toBe("ubuntu-latest");
   });
 
-  it("pins only the approved actions to immutable SHAs with version comments", () => {
+  it("pins only the approved actions to immutable SHAs with v5 version comments", () => {
     const check = blockFor(blockFor(lines, "jobs", 0), "check", 2);
     const actionSteps = stepBlocks(check).filter((step) => valuesFor(step, "uses").length > 0);
     const actions = actionSteps.map((step) => onlyValue(step, "uses"));
@@ -106,7 +106,7 @@ describe("CI workflow contract", () => {
     ]);
     for (const step of actionSteps) {
       expect(onlyValue(step, "uses")).toMatch(/^[\w-]+\/[\w-]+@[0-9a-f]{40}$/);
-      expect(valuesFor(step, "uses")[0].line.raw).toMatch(/#\s*v4(?:\.\d+\.\d+)?\s*$/);
+      expect(valuesFor(step, "uses")[0].line.raw).toMatch(/#\s*v5\.\d+\.\d+\s*$/);
     }
   });
 
