@@ -16,6 +16,11 @@ export type {
   HttpCheckOutcome,
 } from "./evaluate-monitor.js";
 export {
+  HeartbeatTokenNotFoundError,
+  materializeDueHeartbeatDeadline,
+  recordHeartbeatPing,
+} from "./heartbeat.js";
+export {
   InvalidHistoryCursorError,
   listChecks,
   listIncidents,
@@ -55,6 +60,7 @@ export {
 } from "./notifications.js";
 export {
   archiveMonitor,
+  createHeartbeatMonitor,
   createHttpMonitor,
   getHttpMonitor,
   getMonitor,
@@ -63,6 +69,7 @@ export {
   MonitorNotFoundError,
   pauseMonitor,
   resumeMonitor,
+  rotateHeartbeatToken,
   updateMonitor,
 } from "./monitors.js";
 export {

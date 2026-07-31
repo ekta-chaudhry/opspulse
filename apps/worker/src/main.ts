@@ -3,6 +3,7 @@ import {
   claimDueNotificationDelivery,
   completeHttpCheck,
   createDatabasePool,
+  materializeDueHeartbeatDeadline,
   type DatabasePoolConfig,
   type HttpCheckOutcome,
   type HttpCheckWorkItem,
@@ -36,6 +37,7 @@ type WorkerPool = TransactionPool & {
 
 export type WorkerWorkItem =
   | { kind: "http_check"; workItem: HttpCheckWorkItem }
+  | { kind: "heartbeat_deadline"; workItem: null }
   | { kind: "notification_delivery"; workItem: NotificationDeliveryWorkItem };
 
 export type PollingLoopOptions = {
@@ -51,6 +53,7 @@ export type WorkerRuntimeDependencies = {
   createPool(config: DatabasePoolConfig): WorkerPool;
   claimDueHttpCheck(pool: TransactionPool): Promise<HttpCheckWorkItem | null>;
   claimDueNotificationDelivery(pool: TransactionPool): Promise<NotificationDeliveryWorkItem | null>;
+  materializeDueHeartbeatDeadline(pool: TransactionPool): Promise<boolean>;
   completeHttpCheck(
     pool: TransactionPool,
     requestId: string,
@@ -101,6 +104,7 @@ const defaultDependencies: WorkerRuntimeDependencies = {
   createPool: createDatabasePool,
   claimDueHttpCheck,
   claimDueNotificationDelivery,
+  materializeDueHeartbeatDeadline,
   completeHttpCheck,
   checkHttpMonitor,
   deliverNotification,
@@ -131,6 +135,8 @@ export async function runPollingLoop(options: PollingLoopOptions): Promise<void>
           requestId: workItem.workItem.request.id,
           monitorId: workItem.workItem.request.monitorId,
         });
+      } else if (workItem.kind === "heartbeat_deadline") {
+        options.log({ event: "heartbeat_deadline_materialized" });
       } else {
         options.log({
           event: "notification_delivery_attempted",
@@ -164,20 +170,26 @@ export function startWorker(
     claim: async () => {
       const httpCheck = await dependencies.claimDueHttpCheck(pool);
       if (httpCheck !== null) return { kind: "http_check", workItem: httpCheck };
+      const materializedHeartbeat = await dependencies.materializeDueHeartbeatDeadline(pool);
+      if (materializedHeartbeat) return { kind: "heartbeat_deadline", workItem: null };
       const delivery = await dependencies.claimDueNotificationDelivery(pool);
       return delivery === null ? null : { kind: "notification_delivery", workItem: delivery };
     },
-    check: (workItem) => workItem.kind === "http_check"
-      ? dependencies.checkHttpMonitor(
-        workItem.workItem,
-        checkerDependencies,
-        requestController.signal,
-      )
-      : dependencies.deliverNotification(
+    check: (workItem) => {
+      if (workItem.kind === "http_check") {
+        return dependencies.checkHttpMonitor(
+          workItem.workItem,
+          checkerDependencies,
+          requestController.signal,
+        );
+      }
+      if (workItem.kind === "heartbeat_deadline") return Promise.resolve();
+      return dependencies.deliverNotification(
         workItem.workItem,
         notifierDependencies,
         requestController.signal,
-      ),
+      );
+    },
     sleep: (milliseconds) => dependencies.sleep(milliseconds, controller.signal),
     log: (entry) => {
       dependencies.log(entry);

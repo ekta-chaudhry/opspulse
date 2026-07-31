@@ -1,9 +1,13 @@
 import {
+  HeartbeatMonitorInputSchema,
   HttpMonitorInputSchema,
   IdSchema,
   MonitorListQuerySchema,
   MonitorListResponseSchema,
   UpdateMonitorSchema,
+  type CreateMonitorResponse,
+  type HeartbeatMonitorInput,
+  type HeartbeatTokenResponse,
   type HttpMonitorInput,
   type MonitorListQuery,
   type MonitorListResponse,
@@ -11,9 +15,10 @@ import {
   type PrivateMonitor,
   type UpdateMonitor,
 } from "@opspulse/contracts";
+import { createHash, randomBytes } from "node:crypto";
 import type { QueryClient } from "./client.js";
 import { decodeHistoryCursor, historyCursorForRow } from "./history.js";
-import { toPrivateHttpMonitor, toPrivateMonitor } from "./rows.js";
+import { toPrivateHeartbeatMonitor, toPrivateHttpMonitor, toPrivateMonitor } from "./rows.js";
 import { withTransaction, type TransactionClient, type TransactionPool } from "./transaction.js";
 
 const HTTP_MONITOR_COLUMNS = `
@@ -45,6 +50,19 @@ export class MonitorLifecycleConflictError extends Error {
     this.name = "MonitorLifecycleConflictError";
   }
 }
+
+function generateHeartbeatToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+function heartbeatTokenHash(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+const heartbeatCredentials = (token: string) => ({
+  token,
+  pingPath: `/v1/heartbeats/${token}`,
+});
 
 export async function createHttpMonitor(
   pool: QueryClient,
@@ -78,6 +96,67 @@ export async function createHttpMonitor(
   const row = result.rows[0];
   if (row === undefined) throw new Error("HTTP monitor insert returned no row");
   return toPrivateHttpMonitor(row);
+}
+
+export async function createHeartbeatMonitor(
+  pool: QueryClient,
+  input: HeartbeatMonitorInput,
+  now: Date = new Date(),
+  token: string = generateHeartbeatToken(),
+): Promise<CreateMonitorResponse> {
+  const monitor = HeartbeatMonitorInputSchema.parse(input);
+  const result = await pool.query(
+    `INSERT INTO monitors (
+      kind, name, published, interval_seconds, failure_threshold, recovery_threshold,
+      grace_period_seconds, next_heartbeat_deadline, heartbeat_token_hash,
+      heartbeat_token_rotated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz + ($4 + $7) * interval '1 second', $9, $8)
+    RETURNING *`,
+    [
+      monitor.kind,
+      monitor.name,
+      monitor.published,
+      monitor.intervalSeconds,
+      monitor.failureThreshold,
+      monitor.recoveryThreshold,
+      monitor.gracePeriodSeconds,
+      now,
+      heartbeatTokenHash(token),
+    ],
+  );
+  const row = result.rows[0];
+  if (row === undefined) throw new Error("heartbeat monitor insert returned no row");
+  return {
+    monitor: toPrivateHeartbeatMonitor(row),
+    heartbeat: heartbeatCredentials(token),
+  };
+}
+
+export async function rotateHeartbeatToken(
+  pool: TransactionPool,
+  id: string,
+  now: Date = new Date(),
+  token: string = generateHeartbeatToken(),
+): Promise<HeartbeatTokenResponse> {
+  const monitorId = IdSchema.parse(id);
+  return withTransaction(pool, async (client) => {
+    const monitor = await lockMonitor(client, monitorId);
+    if (monitor.kind !== "heartbeat") {
+      throw new MonitorLifecycleConflictError("Only heartbeat monitors have heartbeat tokens");
+    }
+    await client.query(
+      `UPDATE monitors
+      SET heartbeat_token_hash = $2,
+          heartbeat_token_rotated_at = $3,
+          updated_at = $3
+      WHERE id = $1`,
+      [monitorId, heartbeatTokenHash(token), now],
+    );
+    return {
+      ...heartbeatCredentials(token),
+      rotatedAt: now.toISOString(),
+    };
+  });
 }
 
 export async function getHttpMonitor(

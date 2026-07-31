@@ -1,4 +1,4 @@
-import type { HttpMonitorInput } from "@opspulse/contracts";
+import type { HeartbeatMonitorInput, HttpMonitorInput } from "@opspulse/contracts";
 import { describe, expect, it } from "vitest";
 import type { QueryClient, QueryResult } from "./client.js";
 import type {
@@ -8,6 +8,7 @@ import type {
 } from "./transaction.js";
 import {
   archiveMonitor,
+  createHeartbeatMonitor,
   createHttpMonitor,
   getHttpMonitor,
   getMonitor,
@@ -15,11 +16,14 @@ import {
   MonitorLifecycleConflictError,
   pauseMonitor,
   resumeMonitor,
+  rotateHeartbeatToken,
   updateMonitor,
 } from "./monitors.js";
 
 const monitorId = "11111111-1111-4111-8111-111111111111";
 const now = new Date("2026-07-22T10:00:00.000Z");
+
+const heartbeatToken = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ";
 
 const input: HttpMonitorInput = {
   kind: "http",
@@ -33,6 +37,16 @@ const input: HttpMonitorInput = {
   timeoutSeconds: 5,
   acceptedStatus: { min: 200, max: 399 },
   headers: [],
+};
+
+const heartbeatInput: HeartbeatMonitorInput = {
+  kind: "heartbeat",
+  name: "Nightly import",
+  published: false,
+  intervalSeconds: 60,
+  failureThreshold: 2,
+  recoveryThreshold: 1,
+  gracePeriodSeconds: 60,
 };
 
 const row = {
@@ -108,6 +122,23 @@ const transactionFor = (...rows: unknown[][]): FakeTransactionPool =>
     rows: resultRows,
   }))));
 
+const heartbeatRow = {
+  ...row,
+  id: "44444444-4444-4444-8444-444444444444",
+  kind: "heartbeat",
+  name: "Nightly import",
+  url: null,
+  method: null,
+  timeout_seconds: null,
+  accepted_status_min: null,
+  accepted_status_max: null,
+  headers: null,
+  next_check_at: null,
+  grace_period_seconds: 60,
+  last_heartbeat_at: null,
+  next_heartbeat_deadline: new Date("2026-07-22T10:02:00.000Z"),
+};
+
 describe("HTTP monitor persistence", () => {
   it("creates an immediately due HTTP monitor with a database-generated UUID", async () => {
     const pool = new FakeQueryClient([{ rows: [row] }]);
@@ -134,6 +165,65 @@ describe("HTTP monitor persistence", () => {
       JSON.stringify([]),
       now,
     ]);
+  });
+
+  it("creates a heartbeat monitor with a hashed one-time token", async () => {
+    const pool = new FakeQueryClient([{ rows: [heartbeatRow] }]);
+
+    const result = await createHeartbeatMonitor(pool, heartbeatInput, now, heartbeatToken);
+
+    expect(result.monitor).toMatchObject({
+      id: heartbeatRow.id,
+      kind: "heartbeat",
+      nextHeartbeatDeadline: "2026-07-22T10:02:00.000Z",
+    });
+    if (!("heartbeat" in result)) throw new Error("expected heartbeat credentials");
+    expect(result.heartbeat).toEqual({
+      token: heartbeatToken,
+      pingPath: `/v1/heartbeats/${heartbeatToken}`,
+    });
+    expect(pool.calls[0]?.text).toMatch(/^INSERT INTO monitors/u);
+    expect(pool.calls[0]?.text).toContain("heartbeat_token_hash");
+    expect(pool.calls[0]?.values).toEqual([
+      "heartbeat",
+      "Nightly import",
+      false,
+      60,
+      2,
+      1,
+      60,
+      now,
+      "46a2199782c8827f0ac56f503be9d39efee97f40a736b92cc7d7c5f825cfd851",
+    ]);
+  });
+
+  it("rotates heartbeat tokens without returning a monitor payload", async () => {
+    const rotatedAt = new Date("2026-07-22T10:05:00.000Z");
+    const pool = transactionFor([], [heartbeatRow], [], []);
+
+    const token = await rotateHeartbeatToken(pool, heartbeatRow.id, rotatedAt, heartbeatToken);
+
+    expect(token).toEqual({
+      token: heartbeatToken,
+      pingPath: `/v1/heartbeats/${heartbeatToken}`,
+      rotatedAt: "2026-07-22T10:05:00.000Z",
+    });
+    expect(pool.client.calls.some(({ text }) => text.includes("heartbeat_token_hash = $2"))).toBe(
+      true,
+    );
+    expect(pool.client.calls.find(({ text }) => text.startsWith("UPDATE monitors"))?.values).toEqual([
+      heartbeatRow.id,
+      "46a2199782c8827f0ac56f503be9d39efee97f40a736b92cc7d7c5f825cfd851",
+      rotatedAt,
+    ]);
+  });
+
+  it("rejects token rotation for non-heartbeat monitors", async () => {
+    const pool = transactionFor([], [row], []);
+
+    await expect(rotateHeartbeatToken(pool, monitorId, now, heartbeatToken)).rejects.toBeInstanceOf(
+      MonitorLifecycleConflictError,
+    );
   });
 
   it("loads an HTTP monitor and its active incident projection by UUID", async () => {

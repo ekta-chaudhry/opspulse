@@ -171,21 +171,23 @@ export const DASHBOARD_HTML = `<!doctype html>
 
   <dialog id="monitor-form-dialog" aria-labelledby="monitor-form-title">
     <div class="dialog-head">
-      <div><div class="brand">HTTP monitor</div><h2 id="monitor-form-title">Create a monitor</h2></div>
+      <div><div class="brand">HTTP or heartbeat monitor</div><h2 id="monitor-form-title">Create a monitor</h2></div>
       <button class="secondary small" type="button" data-close="monitor-form-dialog">Close</button>
     </div>
     <form id="monitor-form" class="dialog-body">
       <div class="form-grid">
-        <div class="field field-wide"><label for="monitor-name">Name</label><input id="monitor-name" name="name" maxlength="100" required placeholder="Production API"></div>
-        <div class="field field-wide"><label for="monitor-url">URL</label><input id="monitor-url" name="url" type="url" maxlength="2048" required placeholder="https://api.example.com/health"></div>
-        <div class="field"><label for="monitor-method">Method</label><select id="monitor-method" name="method"><option>GET</option><option>HEAD</option></select></div>
+        <div class="field"><label for="monitor-kind">Type</label><select id="monitor-kind" name="kind"><option value="http">HTTP</option><option value="heartbeat">Heartbeat</option></select></div>
+        <div class="field"><label for="monitor-name">Name</label><input id="monitor-name" name="name" maxlength="100" required placeholder="Production API"></div>
+        <div class="field field-wide http-field"><label for="monitor-url">URL</label><input id="monitor-url" name="url" type="url" maxlength="2048" required placeholder="https://api.example.com/health"></div>
+        <div class="field http-field"><label for="monitor-method">Method</label><select id="monitor-method" name="method"><option>GET</option><option>HEAD</option></select></div>
         <div class="field"><label for="monitor-interval">Interval seconds</label><input id="monitor-interval" name="intervalSeconds" type="number" min="30" max="86400" value="60" required></div>
-        <div class="field"><label for="monitor-timeout">Timeout seconds</label><input id="monitor-timeout" name="timeoutSeconds" type="number" min="1" max="30" value="5" required></div>
+        <div class="field heartbeat-field" hidden><label for="monitor-grace">Grace seconds</label><input id="monitor-grace" name="gracePeriodSeconds" type="number" min="0" max="86400" value="60"></div>
+        <div class="field http-field"><label for="monitor-timeout">Timeout seconds</label><input id="monitor-timeout" name="timeoutSeconds" type="number" min="1" max="30" value="5" required></div>
         <div class="field"><label for="monitor-status-min">Minimum accepted status</label><input id="monitor-status-min" name="statusMin" type="number" min="100" max="599" value="200" required></div>
         <div class="field"><label for="monitor-status-max">Maximum accepted status</label><input id="monitor-status-max" name="statusMax" type="number" min="100" max="599" value="399" required></div>
         <div class="field"><label for="monitor-failures">Failure threshold</label><input id="monitor-failures" name="failureThreshold" type="number" min="1" max="10" value="2" required></div>
         <div class="field"><label for="monitor-recoveries">Recovery threshold</label><input id="monitor-recoveries" name="recoveryThreshold" type="number" min="1" max="10" value="1" required></div>
-        <div class="field field-wide"><label for="monitor-headers">Request headers (JSON)</label><textarea id="monitor-headers" name="headers" spellcheck="false">[]</textarea></div>
+        <div class="field field-wide http-field"><label for="monitor-headers">Request headers (JSON)</label><textarea id="monitor-headers" name="headers" spellcheck="false">[]</textarea></div>
         <label class="check-field field-wide" for="monitor-published"><input id="monitor-published" name="published" type="checkbox"> Publish on the status page</label>
       </div>
       <p id="monitor-form-error" class="form-error" role="status" aria-live="polite"></p>
@@ -254,7 +256,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       target.replaceChildren(...monitors.map((monitor) => {
         const row = make('article', 'row monitor-row');
         const identity = make('div');
-        identity.append(make('div', 'name', monitor.name), make('div', 'sub', monitor.url || monitor.kind));
+        identity.append(make('div', 'name', monitor.name), make('div', 'sub', monitor.kind === 'heartbeat' ? 'Heartbeat · next ' + (monitor.nextHeartbeatDeadline ? relativeTime(monitor.nextHeartbeatDeadline) : 'not scheduled') : monitor.url));
         const cadence = make('div', 'mobile-hide');
         cadence.append(make('div', 'name', monitor.intervalSeconds + 's'), make('div', 'sub', 'check interval'));
         const checked = make('div', 'mobile-hide');
@@ -338,12 +340,13 @@ export const DASHBOARD_HTML = `<!doctype html>
       const content = byId('detail-content');
       const summary = make('div', 'detail-summary');
       const identity = make('div');
-      identity.append(make('div', 'detail-url', monitor.url || monitor.kind));
+      identity.append(make('div', 'detail-url', monitor.kind === 'heartbeat' ? 'Heartbeat monitor · deadline ' + (monitor.nextHeartbeatDeadline ? formatTime(monitor.nextHeartbeatDeadline) : 'not scheduled') : monitor.url));
       const facts = make('div', 'detail-facts');
       for (const [label, value] of [
         ['Lifecycle', monitor.lifecycle],
         ['Interval', monitor.intervalSeconds + ' seconds'],
-        ['Last evaluated', monitor.lastEvaluatedCheckAt ? relativeTime(monitor.lastEvaluatedCheckAt) : 'Never']
+        [monitor.kind === 'heartbeat' ? 'Last heartbeat' : 'Last evaluated', monitor.kind === 'heartbeat' ? (monitor.lastHeartbeatAt ? relativeTime(monitor.lastHeartbeatAt) : 'Never') : (monitor.lastEvaluatedCheckAt ? relativeTime(monitor.lastEvaluatedCheckAt) : 'Never')],
+        ...(monitor.kind === 'heartbeat' ? [['Grace', monitor.gracePeriodSeconds + ' seconds']] : [])
       ]) {
         const fact = make('div', 'fact');
         fact.append(make('span', '', label), make('strong', '', value));
@@ -357,6 +360,10 @@ export const DASHBOARD_HTML = `<!doctype html>
         const edit = make('button', 'secondary', 'Edit monitor');
         edit.addEventListener('click', () => openMonitorForm(monitor));
         actions.append(edit);
+      } else {
+        const rotate = make('button', 'secondary', 'Rotate token');
+        rotate.addEventListener('click', () => rotateHeartbeatToken());
+        actions.append(rotate);
       }
       if (monitor.lifecycle === 'active') {
         const pause = make('button', 'secondary', 'Pause monitor');
@@ -418,6 +425,19 @@ export const DASHBOARD_HTML = `<!doctype html>
       }
     }
 
+    async function rotateHeartbeatToken() {
+      if (!selectedMonitorId) return;
+      const monitorPath = ['/v1/monitors', encodeURIComponent(selectedMonitorId)].join('/');
+      byId('detail-error').textContent = '';
+      try {
+        const token = await fetchJson(monitorPath + '/heartbeat-token', { method: 'POST' });
+        window.prompt('Copy heartbeat ping curl', 'curl -X POST ' + location.origin + token.pingPath + ' -H "Idempotency-Key: nightly-job-$(date +%F)"');
+        await openMonitor(selectedMonitorId);
+      } catch (error) {
+        byId('detail-error').textContent = error instanceof Error ? error.message : 'Token rotation failed';
+      }
+    }
+
     async function runLifecycleCommand(command) {
       if (!selectedMonitorId) return;
       if (command === 'archive' && !window.confirm('Archive this monitor? Its history will be retained.')) return;
@@ -474,6 +494,8 @@ export const DASHBOARD_HTML = `<!doctype html>
       const form = byId('monitor-form');
       form.reset();
       editingMonitorId = monitor && monitor.id;
+      form.elements.kind.value = monitor && monitor.kind ? monitor.kind : 'http';
+      updateMonitorKindFields();
       byId('monitor-form-error').textContent = '';
       byId('monitor-form-title').textContent = monitor ? 'Edit monitor' : 'Create a monitor';
       form.querySelector('[type="submit"]').textContent = monitor ? 'Save changes' : 'Create monitor';
@@ -494,6 +516,17 @@ export const DASHBOARD_HTML = `<!doctype html>
       byId('monitor-form-dialog').showModal();
     }
 
+    function updateMonitorKindFields() {
+      const kind = byId('monitor-kind').value;
+      document.querySelectorAll('.http-field').forEach((node) => { node.hidden = kind !== 'http'; });
+      document.querySelectorAll('.heartbeat-field').forEach((node) => { node.hidden = kind !== 'heartbeat'; });
+      byId('monitor-url').required = kind === 'http';
+      byId('monitor-timeout').required = kind === 'http';
+      byId('monitor-status-min').required = kind === 'http';
+      byId('monitor-status-max').required = kind === 'http';
+    }
+
+    byId('monitor-kind').addEventListener('change', updateMonitorKindFields);
     byId('refresh').addEventListener('click', loadDashboard);
     byId('new-monitor').addEventListener('click', () => openMonitorForm());
     document.querySelectorAll('[data-close]').forEach((button) => {
@@ -510,30 +543,40 @@ export const DASHBOARD_HTML = `<!doctype html>
         const monitorPath = editingMonitorId
           ? ['/v1/monitors', encodeURIComponent(editingMonitorId)].join('/')
           : '/v1/monitors';
+        const kind = String(values.get('kind'));
+        const common = {
+          kind,
+          name: values.get('name'),
+          intervalSeconds: Number(values.get('intervalSeconds')),
+          failureThreshold: Number(values.get('failureThreshold')),
+          recoveryThreshold: Number(values.get('recoveryThreshold')),
+          published: form.elements.published.checked
+        };
         const saved = await fetchJson(monitorPath, {
           method: editingMonitorId ? 'PATCH' : 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            kind: 'http',
-            name: values.get('name'),
+          body: JSON.stringify(kind === 'heartbeat' ? {
+            ...common,
+            gracePeriodSeconds: Number(values.get('gracePeriodSeconds'))
+          } : {
+            ...common,
             url: values.get('url'),
             method: values.get('method'),
-            intervalSeconds: Number(values.get('intervalSeconds')),
             timeoutSeconds: Number(values.get('timeoutSeconds')),
             acceptedStatus: {
               min: Number(values.get('statusMin')),
               max: Number(values.get('statusMax'))
             },
-            headers: JSON.parse(String(values.get('headers') || '[]')),
-            failureThreshold: Number(values.get('failureThreshold')),
-            recoveryThreshold: Number(values.get('recoveryThreshold')),
-            published: form.elements.published.checked
+            headers: JSON.parse(String(values.get('headers') || '[]'))
           })
         });
         byId('monitor-form-dialog').close();
         form.reset();
         editingMonitorId = undefined;
         await loadDashboard();
+        if (saved.heartbeat) {
+          window.prompt('Copy heartbeat ping curl', 'curl -X POST ' + location.origin + saved.heartbeat.pingPath + ' -H "Idempotency-Key: nightly-job-$(date +%F)"');
+        }
         await openMonitor(saved.monitor.id);
       } catch (error) {
         byId('monitor-form-error').textContent = error instanceof Error ? error.message : 'Unable to save monitor';

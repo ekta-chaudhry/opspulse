@@ -10,6 +10,10 @@ import {
   CorrelationIdSchema,
   CreateMonitorResponseSchema,
   CreateMonitorSchema,
+  HeartbeatAcceptedSchema,
+  HeartbeatHeadersSchema,
+  HeartbeatTokenParamsSchema,
+  HeartbeatTokenResponseSchema,
   CreateNotificationChannelSchema,
   DeliveryIdParamsSchema,
   DeliveryListQuerySchema,
@@ -38,6 +42,8 @@ import {
   type DeliveryListQuery,
   type DeliveryListResponse,
   type CreateNotificationChannel,
+  type CreateMonitorResponse,
+  type HeartbeatMonitorInput,
   type HttpMonitorInput,
   type IncidentDetailResponse,
   type IncidentListResponse,
@@ -51,6 +57,7 @@ import {
   type UpdateNotificationChannel,
 } from "@opspulse/contracts";
 import {
+  HeartbeatTokenNotFoundError,
   IncidentNotFoundError,
   InvalidHistoryCursorError,
   MonitorLifecycleConflictError,
@@ -74,6 +81,7 @@ export type AppDependencies = {
     monitorId: string,
     channelId: string,
   ) => Promise<ChannelResponse>;
+  createHeartbeatMonitor: (input: HeartbeatMonitorInput) => Promise<CreateMonitorResponse>;
   createHttpMonitor: (input: HttpMonitorInput) => Promise<PrivateHttpMonitor>;
   createNotificationChannel: (
     input: CreateNotificationChannel,
@@ -99,6 +107,8 @@ export type AppDependencies = {
     input: ReplayDelivery,
   ) => Promise<unknown>;
   resumeMonitor: (monitorId: string) => Promise<PrivateMonitor>;
+  recordHeartbeatPing: (token: string, headers: import("@opspulse/contracts").HeartbeatHeaders) => Promise<unknown>;
+  rotateHeartbeatToken: (monitorId: string) => Promise<unknown>;
   updateMonitor: (monitorId: string, input: UpdateMonitor) => Promise<PrivateMonitor>;
   updateNotificationChannel: (
     channelId: string,
@@ -195,6 +205,15 @@ export function createApp(dependencies: AppDependencies): express.Express {
     response.json(CheckListResponseSchema.parse(result));
   });
 
+  app.post("/v1/heartbeats/:token", async (request, response) => {
+    const { token } = parse(HeartbeatTokenParamsSchema, request.params);
+    const headers = parse(HeartbeatHeadersSchema, {
+      "idempotency-key": request.get("idempotency-key"),
+    });
+    const result = await dependencies.recordHeartbeatPing(token, headers);
+    response.status(202).json(HeartbeatAcceptedSchema.parse(result));
+  });
+
   app.get("/v1/deliveries", async (request, response) => {
     const query = parse(DeliveryListQuerySchema, request.query);
     const result = await dependencies.listNotificationDeliveries(query);
@@ -258,13 +277,18 @@ export function createApp(dependencies: AppDependencies): express.Express {
   app.post("/v1/monitors", async (request, response) => {
     const input = parse(CreateMonitorSchema, request.body);
     if (input.kind === "heartbeat") {
-      throw new ApiHttpError(
-        "conflict",
-        "Heartbeat monitors are not implemented in this local milestone",
-      );
+      const result = await dependencies.createHeartbeatMonitor(input);
+      response.status(201).json(CreateMonitorResponseSchema.parse(result));
+      return;
     }
     const monitor = await dependencies.createHttpMonitor(input);
     response.status(201).json(CreateMonitorResponseSchema.parse({ monitor }));
+  });
+
+  app.post("/v1/monitors/:monitorId/heartbeat-token", async (request, response) => {
+    const { monitorId } = parse(MonitorIdParamsSchema, request.params);
+    const token = await dependencies.rotateHeartbeatToken(monitorId);
+    response.json(HeartbeatTokenResponseSchema.parse(token));
   });
 
   app.get("/v1/monitors/:monitorId", async (request, response) => {
@@ -324,6 +348,8 @@ export function createApp(dependencies: AppDependencies): express.Express {
         ])
         : error instanceof MonitorNotFoundError
           ? new ApiHttpError("not_found", "Monitor not found")
+          : error instanceof HeartbeatTokenNotFoundError
+            ? new ApiHttpError("not_found", "Heartbeat token not found")
           : error instanceof NotificationChannelNotFoundError
             ? new ApiHttpError("not_found", "Notification channel not found")
           : error instanceof NotificationDeliveryNotFoundError
