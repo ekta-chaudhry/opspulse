@@ -11,6 +11,11 @@ import {
   CreateMonitorResponseSchema,
   CreateMonitorSchema,
   CreateNotificationChannelSchema,
+  DeliveryIdParamsSchema,
+  DeliveryListQuerySchema,
+  DeliveryListResponseSchema,
+  IncidentDetailResponseSchema,
+  IncidentIdParamsSchema,
   IncidentListQuerySchema,
   IncidentListResponseSchema,
   LifecycleCommandResponseSchema,
@@ -19,6 +24,7 @@ import {
   MonitorListQuerySchema,
   MonitorListResponseSchema,
   MonitorResponseSchema,
+  ReplayDeliverySchema,
   UpdateMonitorSchema,
   UpdateNotificationChannelSchema,
   z,
@@ -29,22 +35,29 @@ import {
   type ChannelResponse,
   type CheckListResponse,
   type CheckListQuery,
+  type DeliveryListQuery,
+  type DeliveryListResponse,
   type CreateNotificationChannel,
   type HttpMonitorInput,
+  type IncidentDetailResponse,
   type IncidentListResponse,
   type IncidentListQuery,
   type MonitorListQuery,
   type MonitorListResponse,
   type PrivateHttpMonitor,
   type PrivateMonitor,
+  type ReplayDelivery,
   type UpdateMonitor,
   type UpdateNotificationChannel,
 } from "@opspulse/contracts";
 import {
+  IncidentNotFoundError,
   InvalidHistoryCursorError,
   MonitorLifecycleConflictError,
   MonitorNotFoundError,
   NotificationChannelNotFoundError,
+  NotificationDeliveryNotFoundError,
+  NotificationDeliveryReplayConflictError,
 } from "@opspulse/database";
 import express, {
   type ErrorRequestHandler,
@@ -69,6 +82,7 @@ export type AppDependencies = {
     monitorId: string,
     channelId: string,
   ) => Promise<ChannelResponse>;
+  getIncidentDetail: (incidentId: string) => Promise<IncidentDetailResponse>;
   getMonitor: (monitorId: string) => Promise<PrivateMonitor | null>;
   listChecks: (options: CheckListQuery) => Promise<CheckListResponse>;
   listMonitors: (options: MonitorListQuery) => Promise<MonitorListResponse>;
@@ -78,7 +92,12 @@ export type AppDependencies = {
   ) => Promise<CheckListResponse>;
   listIncidents: (options: IncidentListQuery) => Promise<IncidentListResponse>;
   listNotificationChannels: (options: ChannelListQuery) => Promise<ChannelListResponse>;
+  listNotificationDeliveries: (options: DeliveryListQuery) => Promise<DeliveryListResponse>;
   pauseMonitor: (monitorId: string) => Promise<PrivateMonitor>;
+  replayNotificationDelivery: (
+    deliveryId: string,
+    input: ReplayDelivery,
+  ) => Promise<unknown>;
   resumeMonitor: (monitorId: string) => Promise<PrivateMonitor>;
   updateMonitor: (monitorId: string, input: UpdateMonitor) => Promise<PrivateMonitor>;
   updateNotificationChannel: (
@@ -174,6 +193,19 @@ export function createApp(dependencies: AppDependencies): express.Express {
     const query = parse(CheckListQuerySchema, request.query);
     const result = await dependencies.listChecks(query);
     response.json(CheckListResponseSchema.parse(result));
+  });
+
+  app.get("/v1/deliveries", async (request, response) => {
+    const query = parse(DeliveryListQuerySchema, request.query);
+    const result = await dependencies.listNotificationDeliveries(query);
+    response.json(DeliveryListResponseSchema.parse(result));
+  });
+
+  app.post("/v1/deliveries/:deliveryId/replay", async (request, response) => {
+    const { deliveryId } = parse(DeliveryIdParamsSchema, request.params);
+    const input = parse(ReplayDeliverySchema, request.body);
+    const delivery = await dependencies.replayNotificationDelivery(deliveryId, input);
+    response.status(201).json({ delivery });
   });
 
   app.get("/v1/channels", async (request, response) => {
@@ -272,6 +304,12 @@ export function createApp(dependencies: AppDependencies): express.Express {
     response.json(IncidentListResponseSchema.parse(result));
   });
 
+  app.get("/v1/incidents/:incidentId", async (request, response) => {
+    const { incidentId } = parse(IncidentIdParamsSchema, request.params);
+    const result = await dependencies.getIncidentDetail(incidentId);
+    response.json(IncidentDetailResponseSchema.parse(result));
+  });
+
   app.use((_request, _response, next) => {
     next(new ApiHttpError("not_found", "Route not found"));
   });
@@ -288,6 +326,12 @@ export function createApp(dependencies: AppDependencies): express.Express {
           ? new ApiHttpError("not_found", "Monitor not found")
           : error instanceof NotificationChannelNotFoundError
             ? new ApiHttpError("not_found", "Notification channel not found")
+          : error instanceof NotificationDeliveryNotFoundError
+            ? new ApiHttpError("not_found", "Notification delivery not found")
+          : error instanceof IncidentNotFoundError
+            ? new ApiHttpError("not_found", "Incident not found")
+          : error instanceof NotificationDeliveryReplayConflictError
+            ? new ApiHttpError("conflict", error.message)
           : error instanceof MonitorLifecycleConflictError
             ? new ApiHttpError("conflict", error.message)
         : isBodyParserError(error)

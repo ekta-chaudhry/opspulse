@@ -4,6 +4,8 @@ import {
   ChannelResponseSchema,
   CheckListResponseSchema,
   CreateMonitorResponseSchema,
+  DeliveryListResponseSchema,
+  IncidentDetailResponseSchema,
   IncidentListResponseSchema,
   LivenessResponseSchema,
   LifecycleCommandResponseSchema,
@@ -11,7 +13,9 @@ import {
   MonitorResponseSchema,
   type ChannelListResponse,
   type CheckListResponse,
+  type DeliveryListResponse,
   type HttpMonitorInput,
+  type IncidentDetailResponse,
   type IncidentListResponse,
   type MonitorListResponse,
   type PrivateHttpMonitor,
@@ -59,6 +63,35 @@ const emptyIncidents: IncidentListResponse = IncidentListResponseSchema.parse({
   items: [],
   page: { nextCursor: null, hasMore: false },
 });
+const emptyDeliveries: DeliveryListResponse = DeliveryListResponseSchema.parse({
+  items: [],
+  page: { nextCursor: null, hasMore: false },
+});
+const incidentDetail: IncidentDetailResponse = IncidentDetailResponseSchema.parse({
+  incident: {
+    id: "33333333-3333-4333-8333-333333333333",
+    monitorId: monitor.id,
+    monitorName: monitor.name,
+    status: "open",
+    startedAt: "2026-07-22T12:00:00.000Z",
+    resolvedAt: null,
+    openingCause: {
+      category: "dns",
+      code: "ENOTFOUND",
+      httpStatus: null,
+      safeSummary: "Target hostname could not be resolved",
+    },
+    latestCause: {
+      category: "dns",
+      code: "ENOTFOUND",
+      httpStatus: null,
+      safeSummary: "Target hostname could not be resolved",
+    },
+    resolutionReason: null,
+  },
+  timeline: [],
+  deliveries: [],
+});
 const monitors: MonitorListResponse = MonitorListResponseSchema.parse({
   items: [monitor],
   page: { nextCursor: null, hasMore: false },
@@ -94,14 +127,17 @@ function dependencies(): AppDependencies {
     createNotificationChannel: vi.fn(() => Promise.resolve(channel)),
     detachNotificationChannelFromMonitor: vi.fn(() => Promise.resolve({ channel })),
 
+    getIncidentDetail: vi.fn(() => Promise.resolve(incidentDetail)),
     getMonitor: vi.fn(() => Promise.resolve(monitor)),
     listChecks: vi.fn(() => Promise.resolve(emptyChecks)),
     listMonitors: vi.fn(() => Promise.resolve(monitors)),
     listNotificationChannels: vi.fn(() => Promise.resolve(channels)),
+    listNotificationDeliveries: vi.fn(() => Promise.resolve(emptyDeliveries)),
     pauseMonitor: vi.fn(() => Promise.resolve({
       ...monitor,
       lifecycle: "paused" as const,
     })),
+    replayNotificationDelivery: vi.fn(() => Promise.resolve(emptyDeliveries.items[0] ?? null)),
     resumeMonitor: vi.fn(() => Promise.resolve(monitor)),
     updateMonitor: vi.fn(() => Promise.resolve({ ...monitor, name: "Primary API" })),
     updateNotificationChannel: vi.fn(() => Promise.resolve({ ...channel, name: "Pager" })),
