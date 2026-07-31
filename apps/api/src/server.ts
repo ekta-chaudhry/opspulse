@@ -1,15 +1,21 @@
 import {
   archiveMonitor,
+  archiveNotificationChannel,
+  attachNotificationChannelToMonitor,
   createDatabasePool,
   createHttpMonitor,
+  createNotificationChannel,
+  detachNotificationChannelFromMonitor,
   listChecks,
   listIncidents,
   listMonitorChecks,
   listMonitors,
+  listNotificationChannels,
   getMonitor,
   pauseMonitor,
   resumeMonitor,
   updateMonitor,
+  updateNotificationChannel,
   type DatabasePoolConfig,
   type QueryClient,
   type TransactionPool,
@@ -33,16 +39,22 @@ type ApiPool = QueryClient & TransactionPool & {
 
 export type ApiRuntimeDependencies = {
   archiveMonitor: typeof archiveMonitor;
+  archiveNotificationChannel: typeof archiveNotificationChannel;
+  attachNotificationChannelToMonitor: typeof attachNotificationChannelToMonitor;
   createPool(config: DatabasePoolConfig): ApiPool;
   createApplication(dependencies: AppDependencies): Express;
   createHttpMonitor: typeof createHttpMonitor;
+  createNotificationChannel: typeof createNotificationChannel;
+  detachNotificationChannelFromMonitor: typeof detachNotificationChannelFromMonitor;
   getMonitor: typeof getMonitor;
   listChecks: typeof listChecks;
   listMonitorChecks: typeof listMonitorChecks;
   listMonitors: typeof listMonitors;
+  listNotificationChannels: typeof listNotificationChannels;
   pauseMonitor: typeof pauseMonitor;
   resumeMonitor: typeof resumeMonitor;
   updateMonitor: typeof updateMonitor;
+  updateNotificationChannel: typeof updateNotificationChannel;
   listIncidents: typeof listIncidents;
   listen(app: Express, port: number, host: string): Promise<ClosableServer>;
   log(entry: LogEntry): void;
@@ -74,16 +86,22 @@ function listen(app: Express, port: number, host: string): Promise<ClosableServe
 
 const defaultDependencies: ApiRuntimeDependencies = {
   archiveMonitor,
+  archiveNotificationChannel,
+  attachNotificationChannelToMonitor,
   createPool: createDatabasePool,
   createApplication: createApp,
   createHttpMonitor,
+  createNotificationChannel,
+  detachNotificationChannelFromMonitor,
   getMonitor,
   listChecks,
   listMonitorChecks,
   listMonitors,
+  listNotificationChannels,
   pauseMonitor,
   resumeMonitor,
   updateMonitor,
+  updateNotificationChannel,
   listIncidents,
   listen,
   log: writeLog,
@@ -105,16 +123,27 @@ export async function startApiServer(
   const pool = dependencies.createPool({ connectionString: config.databaseUrl });
   const app = dependencies.createApplication({
     archiveMonitor: (monitorId) => dependencies.archiveMonitor(pool, monitorId),
+    archiveNotificationChannel: (channelId) =>
+      dependencies.archiveNotificationChannel(pool, channelId),
+    attachNotificationChannelToMonitor: (monitorId, channelId) =>
+      dependencies.attachNotificationChannelToMonitor(pool, monitorId, channelId),
     createHttpMonitor: (input) => dependencies.createHttpMonitor(pool, input),
+    createNotificationChannel: (input) => dependencies.createNotificationChannel(pool, input),
+    detachNotificationChannelFromMonitor: (monitorId, channelId) =>
+      dependencies.detachNotificationChannelFromMonitor(pool, monitorId, channelId),
     getMonitor: (monitorId) => dependencies.getMonitor(pool, monitorId),
     listChecks: (options) => dependencies.listChecks(pool, options),
     listMonitors: (options) => dependencies.listMonitors(pool, options),
     listMonitorChecks: (monitorId, options) =>
       dependencies.listMonitorChecks(pool, monitorId, options),
     listIncidents: (options) => dependencies.listIncidents(pool, options),
+    listNotificationChannels: (options) =>
+      dependencies.listNotificationChannels(pool, options),
     pauseMonitor: (monitorId) => dependencies.pauseMonitor(pool, monitorId),
     resumeMonitor: (monitorId) => dependencies.resumeMonitor(pool, monitorId),
     updateMonitor: (monitorId, input) => dependencies.updateMonitor(pool, monitorId, input),
+    updateNotificationChannel: (channelId, input) =>
+      dependencies.updateNotificationChannel(pool, channelId, input),
   });
 
   let server: ClosableServer;

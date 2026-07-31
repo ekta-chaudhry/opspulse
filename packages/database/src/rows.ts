@@ -4,6 +4,7 @@ import {
   FailureCauseSchema,
   IncidentSchema,
   IncidentSummarySchema,
+  NotificationChannelSchema,
   PrivateHeartbeatMonitorSchema,
   PrivateHttpMonitorSchema,
   type PrivateHeartbeatMonitor,
@@ -12,6 +13,7 @@ import {
   type FailureCause,
   type Incident,
   type IncidentSummary,
+  type NotificationChannel,
   type PrivateHttpMonitor,
   type PrivateMonitor,
 } from "@opspulse/contracts";
@@ -59,6 +61,15 @@ function nullableInt8(row: PgRow, column: string): number | null {
 
 function nullableTimestamp(row: PgRow, column: string): string | null {
   return row[column] === null ? null : pgTimestampToIso(row[column], column);
+}
+
+function stringArray(row: PgRow, column: string): string[] {
+  const value = row[column];
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+    throw new TypeError(`${column} must be a string array`);
+  }
+  return value;
 }
 
 function parseJson(value: unknown, column: string): unknown {
@@ -153,7 +164,7 @@ function privateMonitorCommon(row: PgRow) {
     ),
     lastEvaluatedCheckAt: nullableTimestamp(row, "last_evaluated_check_at"),
     activeIncident,
-    notificationChannelIds: [],
+    notificationChannelIds: stringArray(row, "notification_channel_ids"),
     createdAt: pgTimestampToIso(row.created_at, "created_at"),
     updatedAt: pgTimestampToIso(row.updated_at, "updated_at"),
   };
@@ -269,5 +280,19 @@ export function toIncident(value: unknown): Incident {
     openingCause: parseCause(row.opening_cause, "opening_cause"),
     latestCause: parseCause(row.latest_cause, "latest_cause"),
     resolutionReason: row.resolution_reason,
+  });
+}
+
+export function toNotificationChannel(value: unknown): NotificationChannel {
+  const row = asRow(value);
+  return NotificationChannelSchema.parse({
+    id: requiredString(row, "id"),
+    name: requiredString(row, "name"),
+    enabled: requiredBoolean(row, "enabled"),
+    lifecycle: requiredString(row, "lifecycle"),
+    destinationConfigured: true,
+    hasSigningSecret: true,
+    createdAt: pgTimestampToIso(row.created_at, "created_at"),
+    updatedAt: pgTimestampToIso(row.updated_at, "updated_at"),
   });
 }
