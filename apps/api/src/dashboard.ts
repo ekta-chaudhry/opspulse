@@ -67,10 +67,10 @@ export const DASHBOARD_HTML = `<!doctype html>
     .sub { margin-top: 3px; overflow: hidden; color: var(--muted); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
     .badge { display: inline-flex; width: fit-content; align-items: center; gap: 7px; border: 1px solid currentColor; border-radius: 999px; padding: 4px 9px; font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .04em; text-transform: uppercase; }
     .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-    .up, .success { color: var(--mint); }
-    .down, .failure, .timeout { color: var(--red); }
-    .degraded, .paused, .cancelled { color: var(--amber); }
-    .pending { color: var(--blue); }
+    .up, .success, .delivered { color: var(--mint); }
+    .down, .failure, .timeout, .failed { color: var(--red); }
+    .degraded, .paused, .cancelled, .retrying { color: var(--amber); }
+    .pending, .queued { color: var(--blue); }
     .incident-card { padding: 18px 20px; border-bottom: 1px solid rgba(37, 49, 56, .7); }
     .incident-card:last-child { border-bottom: 0; }
     .incident-top { display: flex; justify-content: space-between; gap: 12px; }
@@ -161,6 +161,10 @@ export const DASHBOARD_HTML = `<!doctype html>
       <section class="panel panel-wide" aria-labelledby="checks-title">
         <div class="panel-head"><h2 id="checks-title">Recent checks</h2><span class="panel-note">Latest 12 across monitors</span></div>
         <div class="list" id="recent-checks"><div class="loading">Loading checks...</div></div>
+      </section>
+      <section class="panel panel-wide" aria-labelledby="deliveries-title">
+        <div class="panel-head"><h2 id="deliveries-title">Notification deliveries</h2><span class="panel-note">Latest 12 webhook attempts</span></div>
+        <div class="list" id="recent-deliveries"><div class="loading">Loading deliveries...</div></div>
       </section>
     </div>
   </main>
@@ -306,6 +310,27 @@ export const DASHBOARD_HTML = `<!doctype html>
       }));
     }
 
+    function renderDeliveries(deliveries) {
+      const target = byId('recent-deliveries');
+      if (deliveries.length === 0) return setMessage('recent-deliveries', 'No webhook deliveries queued yet.', 'empty');
+      target.replaceChildren(...deliveries.map((delivery) => {
+        const row = make('article', 'row check-row');
+        const identity = make('div');
+        identity.append(
+          make('div', 'name', 'Channel ' + delivery.channelId.slice(0, 8)),
+          make('div', 'sub', 'Event ' + delivery.incidentEventId.slice(0, 8))
+        );
+        const attempts = make('div', 'mobile-hide');
+        attempts.append(make('div', 'name', String(delivery.attemptCount)), make('div', 'sub', 'attempts'));
+        const last = make('div', 'mobile-hide');
+        last.append(make('div', 'name', delivery.lastResponseStatus === null ? '-' : String(delivery.lastResponseStatus)), make('div', 'sub', 'last status'));
+        const next = make('div', 'mobile-hide');
+        next.append(make('div', 'name', delivery.nextAttemptAt ? relativeTime(delivery.nextAttemptAt) : '-'), make('div', 'sub', 'next attempt'));
+        row.append(identity, badge(delivery.status), attempts, last, next);
+        return row;
+      }));
+    }
+
     const compactEmpty = (message) => make('div', 'compact-empty', message);
 
     function renderMonitorDetail(monitor, checks, incidents) {
@@ -415,10 +440,11 @@ export const DASHBOARD_HTML = `<!doctype html>
       const button = byId('refresh');
       button.disabled = true;
       try {
-        const [allMonitors, incidents, checkPage] = await Promise.all([
+        const [allMonitors, incidents, checkPage, deliveryPage] = await Promise.all([
           fetchAllPages('/v1/monitors?limit=50'),
           fetchAllPages('/v1/incidents?status=open&limit=50'),
-          fetchJson('/v1/checks?limit=12')
+          fetchJson('/v1/checks?limit=12'),
+          fetchJson('/v1/deliveries?limit=12')
         ]);
         const monitors = allMonitors.filter((monitor) => monitor.lifecycle !== 'archived');
         renderMonitors(monitors);
@@ -429,11 +455,13 @@ export const DASHBOARD_HTML = `<!doctype html>
         byId('incident-count').textContent = String(incidents.length);
 
         renderChecks(checkPage.items, new Map(monitors.map((monitor) => [monitor.id, monitor.name])));
+        renderDeliveries(deliveryPage.items);
         byId('updated-at').textContent = 'Updated ' + new Date().toLocaleTimeString();
       } catch (error) {
         setMessage('monitors', 'Unable to load monitor data.', 'error');
         setMessage('open-incidents', 'Unable to load incident data.', 'error');
         setMessage('recent-checks', 'Unable to load check data.', 'error');
+        setMessage('recent-deliveries', 'Unable to load delivery data.', 'error');
         byId('updated-at').textContent = 'Refresh failed';
       } finally {
         button.disabled = false;

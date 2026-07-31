@@ -6,13 +6,16 @@ import {
   createHttpMonitor,
   createNotificationChannel,
   detachNotificationChannelFromMonitor,
+  getIncidentDetail,
+  getMonitor,
   listChecks,
   listIncidents,
   listMonitorChecks,
   listMonitors,
   listNotificationChannels,
-  getMonitor,
+  listNotificationDeliveries,
   pauseMonitor,
+  replayNotificationDelivery,
   resumeMonitor,
   updateMonitor,
   updateNotificationChannel,
@@ -46,16 +49,19 @@ export type ApiRuntimeDependencies = {
   createHttpMonitor: typeof createHttpMonitor;
   createNotificationChannel: typeof createNotificationChannel;
   detachNotificationChannelFromMonitor: typeof detachNotificationChannelFromMonitor;
+  getIncidentDetail: typeof getIncidentDetail;
   getMonitor: typeof getMonitor;
   listChecks: typeof listChecks;
+  listIncidents: typeof listIncidents;
   listMonitorChecks: typeof listMonitorChecks;
   listMonitors: typeof listMonitors;
   listNotificationChannels: typeof listNotificationChannels;
+  listNotificationDeliveries: typeof listNotificationDeliveries;
   pauseMonitor: typeof pauseMonitor;
+  replayNotificationDelivery: typeof replayNotificationDelivery;
   resumeMonitor: typeof resumeMonitor;
   updateMonitor: typeof updateMonitor;
   updateNotificationChannel: typeof updateNotificationChannel;
-  listIncidents: typeof listIncidents;
   listen(app: Express, port: number, host: string): Promise<ClosableServer>;
   log(entry: LogEntry): void;
 };
@@ -93,16 +99,19 @@ const defaultDependencies: ApiRuntimeDependencies = {
   createHttpMonitor,
   createNotificationChannel,
   detachNotificationChannelFromMonitor,
+  getIncidentDetail,
   getMonitor,
   listChecks,
+  listIncidents,
   listMonitorChecks,
   listMonitors,
   listNotificationChannels,
+  listNotificationDeliveries,
   pauseMonitor,
+  replayNotificationDelivery,
   resumeMonitor,
   updateMonitor,
   updateNotificationChannel,
-  listIncidents,
   listen,
   log: writeLog,
 };
@@ -131,6 +140,7 @@ export async function startApiServer(
     createNotificationChannel: (input) => dependencies.createNotificationChannel(pool, input),
     detachNotificationChannelFromMonitor: (monitorId, channelId) =>
       dependencies.detachNotificationChannelFromMonitor(pool, monitorId, channelId),
+    getIncidentDetail: (incidentId) => dependencies.getIncidentDetail(pool, incidentId),
     getMonitor: (monitorId) => dependencies.getMonitor(pool, monitorId),
     listChecks: (options) => dependencies.listChecks(pool, options),
     listMonitors: (options) => dependencies.listMonitors(pool, options),
@@ -139,7 +149,11 @@ export async function startApiServer(
     listIncidents: (options) => dependencies.listIncidents(pool, options),
     listNotificationChannels: (options) =>
       dependencies.listNotificationChannels(pool, options),
+    listNotificationDeliveries: (options) =>
+      dependencies.listNotificationDeliveries(pool, options),
     pauseMonitor: (monitorId) => dependencies.pauseMonitor(pool, monitorId),
+    replayNotificationDelivery: (deliveryId, input) =>
+      dependencies.replayNotificationDelivery(pool, deliveryId, input),
     resumeMonitor: (monitorId) => dependencies.resumeMonitor(pool, monitorId),
     updateMonitor: (monitorId, input) => dependencies.updateMonitor(pool, monitorId, input),
     updateNotificationChannel: (channelId, input) =>

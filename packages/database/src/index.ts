@@ -25,6 +25,14 @@ export type { CheckHistoryFilter, IncidentHistoryFilter } from "./history.js";
 export { MIGRATIONS, MIGRATION_LOCK_KEY, runMigrations } from "./migrations.js";
 export type { Migration, MigrationClient } from "./migrations.js";
 export {
+  getIncidentDetail,
+  listNotificationDeliveries,
+  replayNotificationDelivery,
+  IncidentNotFoundError,
+  NotificationDeliveryNotFoundError,
+  NotificationDeliveryReplayConflictError,
+} from "./delivery-history.js";
+export {
   claimDueNotificationDelivery,
   createIncidentNotificationDeliveries,
   recordNotificationAttempt,
