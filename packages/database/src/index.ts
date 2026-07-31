@@ -24,6 +24,11 @@ export {
 export type { CheckHistoryFilter, IncidentHistoryFilter } from "./history.js";
 export { MIGRATIONS, MIGRATION_LOCK_KEY, runMigrations } from "./migrations.js";
 export type { Migration, MigrationClient } from "./migrations.js";
+export { createIncidentNotificationDeliveries } from "./notification-deliveries.js";
+export type {
+  IncidentNotificationMonitor,
+  IncidentNotificationTransition,
+} from "./notification-deliveries.js";
 export {
   archiveNotificationChannel,
   attachNotificationChannelToMonitor,

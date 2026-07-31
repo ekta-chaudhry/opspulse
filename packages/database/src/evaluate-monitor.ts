@@ -9,6 +9,7 @@ import {
   type IncidentSummary,
 } from "@opspulse/contracts";
 import { evaluateMonitorResult } from "@opspulse/domain";
+import { createIncidentNotificationDeliveries } from "./notification-deliveries.js";
 import { HTTP_MONITOR_COLUMNS } from "./monitors.js";
 import {
   toCheckHistoryItem,
@@ -138,12 +139,16 @@ async function appendIncidentEvent(
   type: "opened" | "failure_observed" | "recovery_observed" | "resolved",
   occurredAt: Date,
   details: object,
-): Promise<void> {
-  await client.query(
+): Promise<string> {
+  const result = await client.query(
     `INSERT INTO incident_events (incident_id, type, occurred_at, details)
-    VALUES ($1, $2, $3, $4::jsonb)`,
+    VALUES ($1, $2, $3, $4::jsonb)
+    RETURNING id`,
     [incidentId, type, occurredAt, JSON.stringify(details)],
   );
+  const row = result.rows[0] as { id?: unknown } | undefined;
+  if (typeof row?.id !== "string") throw new Error("incident event insert returned no id");
+  return row.id;
 }
 
 const increment = (value: number): number =>
@@ -288,8 +293,26 @@ export async function completeHttpCheck(
       const incidentRow = insertedIncident.rows[0];
       if (incidentRow === undefined) throw new Error("incident insert returned no row");
       activeIncident = toIncidentSummary(incidentRow);
-      await appendIncidentEvent(client, activeIncident.id, "opened", now, {
+      const eventId = await appendIncidentEvent(client, activeIncident.id, "opened", now, {
         cause: transition.cause,
+      });
+      await createIncidentNotificationDeliveries(client, {
+        monitor: {
+          id: monitor.id,
+          name: monitor.name,
+          state: "down",
+          publicSlug: monitor.publicSlug,
+        },
+        incidentEventId: eventId,
+        occurredAt: now,
+        transition: {
+          type: "opened",
+          cause: transition.cause,
+          incident: {
+            id: activeIncident.id,
+            startedAt: activeIncident.startedAt,
+          },
+        },
       });
     } else if (transition.type === "incident.observe") {
       if (activeIncident === null) throw new Error("incident observation requires an incident");
@@ -324,8 +347,27 @@ export async function completeHttpCheck(
       if (resolved.rows.length !== 0) {
         throw new Error("incident resolution update must not return rows");
       }
-      await appendIncidentEvent(client, incidentId, "resolved", now, {
+      const eventId = await appendIncidentEvent(client, incidentId, "resolved", now, {
         reason: transition.reason,
+      });
+      await createIncidentNotificationDeliveries(client, {
+        monitor: {
+          id: monitor.id,
+          name: monitor.name,
+          state: evaluation.nextSnapshot.state,
+          publicSlug: monitor.publicSlug,
+        },
+        incidentEventId: eventId,
+        occurredAt: now,
+        transition: {
+          type: "resolved",
+          resolution: transition.reason,
+          incident: {
+            id: incidentId,
+            startedAt: activeIncident.startedAt,
+            resolvedAt: now.toISOString(),
+          },
+        },
       });
       activeIncident = null;
     } else if (checkedOutcome.result === "success" && activeIncident !== null) {

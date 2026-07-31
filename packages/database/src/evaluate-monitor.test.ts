@@ -10,6 +10,9 @@ const monitorId = "11111111-1111-4111-8111-111111111111";
 const requestId = "22222222-2222-4222-8222-222222222222";
 const runId = "33333333-3333-4333-8333-333333333333";
 const incidentId = "44444444-4444-4444-8444-444444444444";
+const openedEventId = "55555555-5555-4555-8555-555555555555";
+const recoveryEventId = "66666666-6666-4666-8666-666666666666";
+const resolvedEventId = "77777777-7777-4777-8777-777777777777";
 const now = new Date("2026-07-22T10:00:00.000Z");
 const cause = {
   category: "connection",
@@ -125,6 +128,7 @@ describe("HTTP check completion", () => {
       { rows: [{ id: runId }] },
       { rows: [] },
       { rows: [incidentRow] },
+      { rows: [{ id: openedEventId }] },
       { rows: [] },
       { rows: [] },
       { rows: [completedProjection("failure")] },
@@ -153,6 +157,7 @@ describe("HTTP check completion", () => {
       expect.stringContaining("UPDATE check_requests"),
       expect.stringContaining("INSERT INTO incidents"),
       expect.stringContaining("INSERT INTO incident_events"),
+      expect.stringContaining("FROM monitor_notification_channels"),
       expect.stringContaining("UPDATE monitors"),
       expect.stringContaining("FROM check_requests cr"),
       "COMMIT",
@@ -171,7 +176,7 @@ describe("HTTP check completion", () => {
       now,
       JSON.stringify({ cause }),
     ]);
-    expect(client.calls[7]?.values).toEqual([
+    expect(client.calls[8]?.values).toEqual([
       monitorId,
       "down",
       "1",
@@ -207,8 +212,9 @@ describe("HTTP check completion", () => {
       { rows: [recoveringRequest] },
       { rows: [{ id: runId }] },
       { rows: [] },
+      { rows: [{ id: recoveryEventId }] },
       { rows: [] },
-      { rows: [] },
+      { rows: [{ id: resolvedEventId }] },
       { rows: [] },
       { rows: [] },
       {
@@ -242,7 +248,8 @@ describe("HTTP check completion", () => {
       now,
       JSON.stringify({ reason: "recovered" }),
     ]);
-    expect(client.calls[8]?.values).toEqual([
+    expect(client.calls[8]?.text).toContain("FROM monitor_notification_channels");
+    expect(client.calls[9]?.values).toEqual([
       monitorId,
       "up",
       "0",
