@@ -5,6 +5,7 @@ import { monitorListIndexMigrationSql } from "./migrations/0003-monitor-list-ind
 import { globalHistoryIndexesMigrationSql } from "./migrations/0004-global-history-indexes.js";
 import { notificationChannelsMigrationSql } from "./migrations/0005-notification-channels.js";
 import { notificationDeliveriesMigrationSql } from "./migrations/0006-notification-deliveries.js";
+import { heartbeatTokensMigrationSql } from "./migrations/0007-heartbeat-tokens.js";
 import {
   withTransaction,
   type TransactionClient,
@@ -54,6 +55,11 @@ export const MIGRATIONS: readonly Migration[] = [
     id: "0006-notification-deliveries",
     sql: notificationDeliveriesMigrationSql,
     checksum: checksum(notificationDeliveriesMigrationSql),
+  },
+  {
+    id: "0007-heartbeat-tokens",
+    sql: heartbeatTokensMigrationSql,
+    checksum: checksum(heartbeatTokensMigrationSql),
   },
 ];
 

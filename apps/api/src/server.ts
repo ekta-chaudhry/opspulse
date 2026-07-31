@@ -3,6 +3,7 @@ import {
   archiveNotificationChannel,
   attachNotificationChannelToMonitor,
   createDatabasePool,
+  createHeartbeatMonitor,
   createHttpMonitor,
   createNotificationChannel,
   detachNotificationChannelFromMonitor,
@@ -15,8 +16,10 @@ import {
   listNotificationChannels,
   listNotificationDeliveries,
   pauseMonitor,
+  recordHeartbeatPing,
   replayNotificationDelivery,
   resumeMonitor,
+  rotateHeartbeatToken,
   updateMonitor,
   updateNotificationChannel,
   type DatabasePoolConfig,
@@ -46,6 +49,7 @@ export type ApiRuntimeDependencies = {
   attachNotificationChannelToMonitor: typeof attachNotificationChannelToMonitor;
   createPool(config: DatabasePoolConfig): ApiPool;
   createApplication(dependencies: AppDependencies): Express;
+  createHeartbeatMonitor: typeof createHeartbeatMonitor;
   createHttpMonitor: typeof createHttpMonitor;
   createNotificationChannel: typeof createNotificationChannel;
   detachNotificationChannelFromMonitor: typeof detachNotificationChannelFromMonitor;
@@ -58,8 +62,10 @@ export type ApiRuntimeDependencies = {
   listNotificationChannels: typeof listNotificationChannels;
   listNotificationDeliveries: typeof listNotificationDeliveries;
   pauseMonitor: typeof pauseMonitor;
+  recordHeartbeatPing: typeof recordHeartbeatPing;
   replayNotificationDelivery: typeof replayNotificationDelivery;
   resumeMonitor: typeof resumeMonitor;
+  rotateHeartbeatToken: typeof rotateHeartbeatToken;
   updateMonitor: typeof updateMonitor;
   updateNotificationChannel: typeof updateNotificationChannel;
   listen(app: Express, port: number, host: string): Promise<ClosableServer>;
@@ -96,6 +102,7 @@ const defaultDependencies: ApiRuntimeDependencies = {
   attachNotificationChannelToMonitor,
   createPool: createDatabasePool,
   createApplication: createApp,
+  createHeartbeatMonitor,
   createHttpMonitor,
   createNotificationChannel,
   detachNotificationChannelFromMonitor,
@@ -108,8 +115,10 @@ const defaultDependencies: ApiRuntimeDependencies = {
   listNotificationChannels,
   listNotificationDeliveries,
   pauseMonitor,
+  recordHeartbeatPing,
   replayNotificationDelivery,
   resumeMonitor,
+  rotateHeartbeatToken,
   updateMonitor,
   updateNotificationChannel,
   listen,
@@ -136,6 +145,7 @@ export async function startApiServer(
       dependencies.archiveNotificationChannel(pool, channelId),
     attachNotificationChannelToMonitor: (monitorId, channelId) =>
       dependencies.attachNotificationChannelToMonitor(pool, monitorId, channelId),
+    createHeartbeatMonitor: (input) => dependencies.createHeartbeatMonitor(pool, input),
     createHttpMonitor: (input) => dependencies.createHttpMonitor(pool, input),
     createNotificationChannel: (input) => dependencies.createNotificationChannel(pool, input),
     detachNotificationChannelFromMonitor: (monitorId, channelId) =>
@@ -152,9 +162,11 @@ export async function startApiServer(
     listNotificationDeliveries: (options) =>
       dependencies.listNotificationDeliveries(pool, options),
     pauseMonitor: (monitorId) => dependencies.pauseMonitor(pool, monitorId),
+    recordHeartbeatPing: (token, headers) => dependencies.recordHeartbeatPing(pool, token, headers),
     replayNotificationDelivery: (deliveryId, input) =>
       dependencies.replayNotificationDelivery(pool, deliveryId, input),
     resumeMonitor: (monitorId) => dependencies.resumeMonitor(pool, monitorId),
+    rotateHeartbeatToken: (monitorId) => dependencies.rotateHeartbeatToken(pool, monitorId),
     updateMonitor: (monitorId, input) => dependencies.updateMonitor(pool, monitorId, input),
     updateNotificationChannel: (channelId, input) =>
       dependencies.updateNotificationChannel(pool, channelId, input),

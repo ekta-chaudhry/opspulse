@@ -58,6 +58,7 @@ it("defines ordered migrations with content-derived SHA-256 checksums", () => {
     "0004-global-history-indexes",
     "0005-notification-channels",
     "0006-notification-deliveries",
+    "0007-heartbeat-tokens",
   ]);
   for (const migration of MIGRATIONS) {
     expect(migration.checksum).toBe(

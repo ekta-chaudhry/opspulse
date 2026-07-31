@@ -14,10 +14,12 @@ import {
   type ChannelListResponse,
   type CheckListResponse,
   type DeliveryListResponse,
+  type HeartbeatMonitorInput,
   type HttpMonitorInput,
   type IncidentDetailResponse,
   type IncidentListResponse,
   type MonitorListResponse,
+  type PrivateHeartbeatMonitor,
   type PrivateHttpMonitor,
 } from "@opspulse/contracts";
 import { InvalidHistoryCursorError } from "@opspulse/database";
@@ -53,6 +55,37 @@ const monitor: PrivateHttpMonitor = {
   nextCheckAt: "2026-07-22T12:01:00.000Z",
   createdAt: "2026-07-22T12:00:00.000Z",
   updatedAt: "2026-07-22T12:00:00.000Z",
+};
+
+const heartbeatMonitor: PrivateHeartbeatMonitor = {
+  id: "44444444-4444-4444-8444-444444444444",
+  kind: "heartbeat",
+  name: "Nightly import",
+  state: "pending",
+  lifecycle: "active",
+  published: false,
+  publicSlug: null,
+  intervalSeconds: 60,
+  failureThreshold: 2,
+  recoveryThreshold: 1,
+  consecutiveFailures: 0,
+  consecutiveSuccesses: 0,
+  generation: 0,
+  nextSequence: 1,
+  lastEvaluatedSequence: 0,
+  lastEvaluatedCheckAt: null,
+  activeIncident: null,
+  notificationChannelIds: [],
+  gracePeriodSeconds: 60,
+  lastHeartbeatAt: null,
+  nextHeartbeatDeadline: "2026-07-22T12:02:00.000Z",
+  createdAt: "2026-07-22T12:00:00.000Z",
+  updatedAt: "2026-07-22T12:00:00.000Z",
+};
+const heartbeatToken = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ";
+const heartbeatCredentials = {
+  token: heartbeatToken,
+  pingPath: `/v1/heartbeats/${heartbeatToken}`,
 };
 
 const emptyChecks: CheckListResponse = CheckListResponseSchema.parse({
@@ -123,6 +156,10 @@ function dependencies(): AppDependencies {
       enabled: false,
     })),
     attachNotificationChannelToMonitor: vi.fn(() => Promise.resolve({ channel })),
+    createHeartbeatMonitor: vi.fn(() => Promise.resolve({
+      monitor: heartbeatMonitor,
+      heartbeat: heartbeatCredentials,
+    })),
     createHttpMonitor: vi.fn(() => Promise.resolve(monitor)),
     createNotificationChannel: vi.fn(() => Promise.resolve(channel)),
     detachNotificationChannelFromMonitor: vi.fn(() => Promise.resolve({ channel })),
@@ -138,7 +175,16 @@ function dependencies(): AppDependencies {
       lifecycle: "paused" as const,
     })),
     replayNotificationDelivery: vi.fn(() => Promise.resolve(emptyDeliveries.items[0] ?? null)),
+    recordHeartbeatPing: vi.fn(() => Promise.resolve({
+      checkId: "55555555-5555-4555-8555-555555555555",
+      receivedAt: "2026-07-22T12:06:00.000Z",
+      deduplicated: false,
+    })),
     resumeMonitor: vi.fn(() => Promise.resolve(monitor)),
+    rotateHeartbeatToken: vi.fn(() => Promise.resolve({
+      ...heartbeatCredentials,
+      rotatedAt: "2026-07-22T12:05:00.000Z",
+    })),
     updateMonitor: vi.fn(() => Promise.resolve({ ...monitor, name: "Primary API" })),
     updateNotificationChannel: vi.fn(() => Promise.resolve({ ...channel, name: "Pager" })),
     listMonitorChecks: vi.fn(() => Promise.resolve(emptyChecks)),
@@ -401,24 +447,56 @@ describe("OpsPulse API", () => {
     } satisfies HttpMonitorInput);
   });
 
-  it("returns a stable conflict for heartbeat creation in this milestone", async () => {
+  it("creates a heartbeat monitor and discloses the token once", async () => {
     const response = await fetch(`${baseUrl}/v1/monitors`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-correlation-id": "heartbeat-test" },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ kind: "heartbeat", name: "Nightly import" }),
     });
-    const body = ApiErrorSchema.parse(await response.json());
+    const body = CreateMonitorResponseSchema.parse(await response.json());
 
-    expect(response.status).toBe(409);
-    expect(body).toEqual({
-      error: {
-        code: "conflict",
-        message: "Heartbeat monitors are not implemented in this local milestone",
-        correlationId: "heartbeat-test",
-        details: [],
-      },
-    });
+    expect(response.status).toBe(201);
+    expect(body).toEqual({ monitor: heartbeatMonitor, heartbeat: heartbeatCredentials });
+    expect(deps.createHeartbeatMonitor).toHaveBeenCalledWith({
+      kind: "heartbeat",
+      name: "Nightly import",
+      published: false,
+      intervalSeconds: 60,
+      failureThreshold: 2,
+      recoveryThreshold: 1,
+      gracePeriodSeconds: 60,
+    } satisfies HeartbeatMonitorInput);
     expect(deps.createHttpMonitor).not.toHaveBeenCalled();
+  });
+
+  it("accepts heartbeat pings by token", async () => {
+    const response = await fetch(`${baseUrl}/v1/heartbeats/${heartbeatToken}`, {
+      method: "POST",
+      headers: { "idempotency-key": "nightly-2026-07-22" },
+    });
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({
+      checkId: "55555555-5555-4555-8555-555555555555",
+      receivedAt: "2026-07-22T12:06:00.000Z",
+      deduplicated: false,
+    });
+    expect(deps.recordHeartbeatPing).toHaveBeenCalledWith(heartbeatToken, {
+      "idempotency-key": "nightly-2026-07-22",
+    });
+  });
+
+  it("rotates a heartbeat token by monitor ID", async () => {
+    const response = await fetch(`${baseUrl}/v1/monitors/${heartbeatMonitor.id}/heartbeat-token`, {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ...heartbeatCredentials,
+      rotatedAt: "2026-07-22T12:05:00.000Z",
+    });
+    expect(deps.rotateHeartbeatToken).toHaveBeenCalledWith(heartbeatMonitor.id);
   });
 
   it("wraps invalid input in a correlated contract error", async () => {
