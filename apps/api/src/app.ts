@@ -2,10 +2,15 @@ import {
   API_ERROR_STATUS,
   ApiErrorSchema,
   CheckListQuerySchema,
+  ChannelIdParamsSchema,
+  ChannelListQuerySchema,
+  ChannelListResponseSchema,
+  ChannelResponseSchema,
   CheckListResponseSchema,
   CorrelationIdSchema,
   CreateMonitorResponseSchema,
   CreateMonitorSchema,
+  CreateNotificationChannelSchema,
   IncidentListQuerySchema,
   IncidentListResponseSchema,
   LifecycleCommandResponseSchema,
@@ -15,11 +20,16 @@ import {
   MonitorListResponseSchema,
   MonitorResponseSchema,
   UpdateMonitorSchema,
+  UpdateNotificationChannelSchema,
   z,
   type ApiErrorCode,
   type ApiErrorDetail,
+  type ChannelListQuery,
+  type ChannelListResponse,
+  type ChannelResponse,
   type CheckListResponse,
   type CheckListQuery,
+  type CreateNotificationChannel,
   type HttpMonitorInput,
   type IncidentListResponse,
   type IncidentListQuery,
@@ -28,11 +38,13 @@ import {
   type PrivateHttpMonitor,
   type PrivateMonitor,
   type UpdateMonitor,
+  type UpdateNotificationChannel,
 } from "@opspulse/contracts";
 import {
   InvalidHistoryCursorError,
   MonitorLifecycleConflictError,
   MonitorNotFoundError,
+  NotificationChannelNotFoundError,
 } from "@opspulse/database";
 import express, {
   type ErrorRequestHandler,
@@ -44,7 +56,19 @@ import { DASHBOARD_HTML } from "./dashboard.js";
 
 export type AppDependencies = {
   archiveMonitor: (monitorId: string) => Promise<PrivateMonitor>;
+  archiveNotificationChannel: (channelId: string) => Promise<unknown>;
+  attachNotificationChannelToMonitor: (
+    monitorId: string,
+    channelId: string,
+  ) => Promise<ChannelResponse>;
   createHttpMonitor: (input: HttpMonitorInput) => Promise<PrivateHttpMonitor>;
+  createNotificationChannel: (
+    input: CreateNotificationChannel,
+  ) => Promise<unknown>;
+  detachNotificationChannelFromMonitor: (
+    monitorId: string,
+    channelId: string,
+  ) => Promise<ChannelResponse>;
   getMonitor: (monitorId: string) => Promise<PrivateMonitor | null>;
   listChecks: (options: CheckListQuery) => Promise<CheckListResponse>;
   listMonitors: (options: MonitorListQuery) => Promise<MonitorListResponse>;
@@ -53,9 +77,14 @@ export type AppDependencies = {
     options: CheckListQuery,
   ) => Promise<CheckListResponse>;
   listIncidents: (options: IncidentListQuery) => Promise<IncidentListResponse>;
+  listNotificationChannels: (options: ChannelListQuery) => Promise<ChannelListResponse>;
   pauseMonitor: (monitorId: string) => Promise<PrivateMonitor>;
   resumeMonitor: (monitorId: string) => Promise<PrivateMonitor>;
   updateMonitor: (monitorId: string, input: UpdateMonitor) => Promise<PrivateMonitor>;
+  updateNotificationChannel: (
+    channelId: string,
+    input: UpdateNotificationChannel,
+  ) => Promise<unknown>;
 };
 
 class ApiHttpError extends Error {
@@ -147,6 +176,53 @@ export function createApp(dependencies: AppDependencies): express.Express {
     response.json(CheckListResponseSchema.parse(result));
   });
 
+  app.get("/v1/channels", async (request, response) => {
+    const query = parse(ChannelListQuerySchema, request.query);
+    const result = await dependencies.listNotificationChannels(query);
+    response.json(ChannelListResponseSchema.parse(result));
+  });
+
+  app.post("/v1/channels", async (request, response) => {
+    const input = parse(CreateNotificationChannelSchema, request.body);
+    const channel = await dependencies.createNotificationChannel(input);
+    response.status(201).json(ChannelResponseSchema.parse({ channel }));
+  });
+
+  app.patch("/v1/channels/:channelId", async (request, response) => {
+    const { channelId } = parse(ChannelIdParamsSchema, request.params);
+    const input = parse(UpdateNotificationChannelSchema, request.body);
+    const channel = await dependencies.updateNotificationChannel(channelId, input);
+    response.json(ChannelResponseSchema.parse({ channel }));
+  });
+
+  app.post("/v1/channels/:channelId/archive", async (request, response) => {
+    const { channelId } = parse(ChannelIdParamsSchema, request.params);
+    const channel = await dependencies.archiveNotificationChannel(channelId);
+    response.json(ChannelResponseSchema.parse({ channel }));
+  });
+
+  app.post("/v1/monitors/:monitorId/channels/:channelId", async (request, response) => {
+    const { monitorId } = parse(MonitorIdParamsSchema, {
+      monitorId: request.params.monitorId,
+    });
+    const { channelId } = parse(ChannelIdParamsSchema, {
+      channelId: request.params.channelId,
+    });
+    const result = await dependencies.attachNotificationChannelToMonitor(monitorId, channelId);
+    response.json(ChannelResponseSchema.parse(result));
+  });
+
+  app.delete("/v1/monitors/:monitorId/channels/:channelId", async (request, response) => {
+    const { monitorId } = parse(MonitorIdParamsSchema, {
+      monitorId: request.params.monitorId,
+    });
+    const { channelId } = parse(ChannelIdParamsSchema, {
+      channelId: request.params.channelId,
+    });
+    const result = await dependencies.detachNotificationChannelFromMonitor(monitorId, channelId);
+    response.json(ChannelResponseSchema.parse(result));
+  });
+
   app.post("/v1/monitors", async (request, response) => {
     const input = parse(CreateMonitorSchema, request.body);
     if (input.kind === "heartbeat") {
@@ -210,6 +286,8 @@ export function createApp(dependencies: AppDependencies): express.Express {
         ])
         : error instanceof MonitorNotFoundError
           ? new ApiHttpError("not_found", "Monitor not found")
+          : error instanceof NotificationChannelNotFoundError
+            ? new ApiHttpError("not_found", "Notification channel not found")
           : error instanceof MonitorLifecycleConflictError
             ? new ApiHttpError("conflict", error.message)
         : isBodyParserError(error)

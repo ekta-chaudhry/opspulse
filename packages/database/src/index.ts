@@ -25,6 +25,16 @@ export type { CheckHistoryFilter, IncidentHistoryFilter } from "./history.js";
 export { MIGRATIONS, MIGRATION_LOCK_KEY, runMigrations } from "./migrations.js";
 export type { Migration, MigrationClient } from "./migrations.js";
 export {
+  archiveNotificationChannel,
+  attachNotificationChannelToMonitor,
+  createNotificationChannel,
+  detachNotificationChannelFromMonitor,
+  listNotificationChannels,
+  NotificationChannelLifecycleConflictError,
+  NotificationChannelNotFoundError,
+  updateNotificationChannel,
+} from "./notifications.js";
+export {
   archiveMonitor,
   createHttpMonitor,
   getHttpMonitor,
@@ -43,6 +53,7 @@ export {
   toCheckRequest,
   toIncident,
   toIncidentSummary,
+  toNotificationChannel,
   toPrivateHttpMonitor,
   toPrivateHeartbeatMonitor,
   toPrivateMonitor,

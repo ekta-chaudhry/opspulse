@@ -20,7 +20,16 @@ const HTTP_MONITOR_COLUMNS = `
   m.*,
   i.status AS active_incident_status,
   i.started_at AS active_incident_started_at,
-  i.latest_cause AS active_incident_latest_cause
+  i.latest_cause AS active_incident_latest_cause,
+  COALESCE((
+    SELECT array_agg(mnc.channel_id ORDER BY mnc.channel_id)
+    FROM monitor_notification_channels mnc
+    JOIN notification_channels nc ON nc.id = mnc.channel_id
+    WHERE mnc.monitor_id = m.id
+      AND mnc.enabled = true
+      AND nc.lifecycle = 'active'
+      AND nc.enabled = true
+  ), ARRAY[]::uuid[]) AS notification_channel_ids
 `;
 
 export class MonitorNotFoundError extends Error {

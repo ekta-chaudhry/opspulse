@@ -1,5 +1,7 @@
 import {
   ApiErrorSchema,
+  ChannelListResponseSchema,
+  ChannelResponseSchema,
   CheckListResponseSchema,
   CreateMonitorResponseSchema,
   IncidentListResponseSchema,
@@ -7,6 +9,7 @@ import {
   LifecycleCommandResponseSchema,
   MonitorListResponseSchema,
   MonitorResponseSchema,
+  type ChannelListResponse,
   type CheckListResponse,
   type HttpMonitorInput,
   type IncidentListResponse,
@@ -60,6 +63,20 @@ const monitors: MonitorListResponse = MonitorListResponseSchema.parse({
   items: [monitor],
   page: { nextCursor: null, hasMore: false },
 });
+const channel = {
+  id: "22222222-2222-4222-8222-222222222222",
+  name: "Alerts",
+  enabled: true,
+  lifecycle: "active" as const,
+  destinationConfigured: true as const,
+  hasSigningSecret: true as const,
+  createdAt: "2026-07-22T12:00:00.000Z",
+  updatedAt: "2026-07-22T12:00:00.000Z",
+};
+const channels: ChannelListResponse = ChannelListResponseSchema.parse({
+  items: [channel],
+  page: { nextCursor: null, hasMore: false },
+});
 
 function dependencies(): AppDependencies {
   return {
@@ -67,16 +84,27 @@ function dependencies(): AppDependencies {
       ...monitor,
       lifecycle: "archived" as const,
     })),
+    archiveNotificationChannel: vi.fn(() => Promise.resolve({
+      ...channel,
+      lifecycle: "archived" as const,
+      enabled: false,
+    })),
+    attachNotificationChannelToMonitor: vi.fn(() => Promise.resolve({ channel })),
     createHttpMonitor: vi.fn(() => Promise.resolve(monitor)),
+    createNotificationChannel: vi.fn(() => Promise.resolve(channel)),
+    detachNotificationChannelFromMonitor: vi.fn(() => Promise.resolve({ channel })),
+
     getMonitor: vi.fn(() => Promise.resolve(monitor)),
     listChecks: vi.fn(() => Promise.resolve(emptyChecks)),
     listMonitors: vi.fn(() => Promise.resolve(monitors)),
+    listNotificationChannels: vi.fn(() => Promise.resolve(channels)),
     pauseMonitor: vi.fn(() => Promise.resolve({
       ...monitor,
       lifecycle: "paused" as const,
     })),
     resumeMonitor: vi.fn(() => Promise.resolve(monitor)),
     updateMonitor: vi.fn(() => Promise.resolve({ ...monitor, name: "Primary API" })),
+    updateNotificationChannel: vi.fn(() => Promise.resolve({ ...channel, name: "Pager" })),
     listMonitorChecks: vi.fn(() => Promise.resolve(emptyChecks)),
     listIncidents: vi.fn(() => Promise.resolve(emptyIncidents)),
   };
@@ -239,6 +267,73 @@ describe("OpsPulse API", () => {
     expect(response.status).toBe(200);
     expect(CheckListResponseSchema.parse(await response.json())).toEqual(emptyChecks);
     expect(deps.listChecks).toHaveBeenCalledWith({ result: "failure", limit: 12 });
+  });
+
+  it("manages notification channels through channel contracts", async () => {
+    const listResponse = await fetch(`${baseUrl}/v1/channels?lifecycle=active&limit=12`);
+    expect(listResponse.status).toBe(200);
+    expect(ChannelListResponseSchema.parse(await listResponse.json())).toEqual(channels);
+    expect(deps.listNotificationChannels).toHaveBeenCalledWith({ lifecycle: "active", limit: 12 });
+
+    const createResponse = await fetch(`${baseUrl}/v1/channels`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Alerts",
+        url: "https://hooks.example.test/opspulse",
+        signingSecret: "x".repeat(32),
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    expect(ChannelResponseSchema.parse(await createResponse.json())).toEqual({ channel });
+    expect(deps.createNotificationChannel).toHaveBeenCalledWith({
+      name: "Alerts",
+      url: "https://hooks.example.test/opspulse",
+      signingSecret: "x".repeat(32),
+      enabled: true,
+    });
+
+    const updateResponse = await fetch(`${baseUrl}/v1/channels/${channel.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Pager" }),
+    });
+    expect(updateResponse.status).toBe(200);
+    expect(ChannelResponseSchema.parse(await updateResponse.json()).channel.name).toBe("Pager");
+    expect(deps.updateNotificationChannel).toHaveBeenCalledWith(channel.id, { name: "Pager" });
+
+    const archiveResponse = await fetch(`${baseUrl}/v1/channels/${channel.id}/archive`, {
+      method: "POST",
+    });
+    expect(archiveResponse.status).toBe(200);
+    expect(ChannelResponseSchema.parse(await archiveResponse.json()).channel.lifecycle).toBe(
+      "archived",
+    );
+    expect(deps.archiveNotificationChannel).toHaveBeenCalledWith(channel.id);
+  });
+
+  it("attaches and detaches notification channels from monitors", async () => {
+    const attachResponse = await fetch(
+      `${baseUrl}/v1/monitors/${monitor.id}/channels/${channel.id}`,
+      { method: "POST" },
+    );
+    expect(attachResponse.status).toBe(200);
+    expect(ChannelResponseSchema.parse(await attachResponse.json())).toEqual({ channel });
+    expect(deps.attachNotificationChannelToMonitor).toHaveBeenCalledWith(
+      monitor.id,
+      channel.id,
+    );
+
+    const detachResponse = await fetch(
+      `${baseUrl}/v1/monitors/${monitor.id}/channels/${channel.id}`,
+      { method: "DELETE" },
+    );
+    expect(detachResponse.status).toBe(200);
+    expect(ChannelResponseSchema.parse(await detachResponse.json())).toEqual({ channel });
+    expect(deps.detachNotificationChannelFromMonitor).toHaveBeenCalledWith(
+      monitor.id,
+      channel.id,
+    );
   });
 
   it("creates an HTTP monitor with contract defaults", async () => {

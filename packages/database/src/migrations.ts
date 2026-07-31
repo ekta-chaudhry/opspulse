@@ -3,6 +3,7 @@ import { verticalSliceMigrationSql } from "./migrations/0001-vertical-slice.js";
 import { checkRequestLeasesMigrationSql } from "./migrations/0002-check-request-leases.js";
 import { monitorListIndexMigrationSql } from "./migrations/0003-monitor-list-index.js";
 import { globalHistoryIndexesMigrationSql } from "./migrations/0004-global-history-indexes.js";
+import { notificationChannelsMigrationSql } from "./migrations/0005-notification-channels.js";
 import {
   withTransaction,
   type TransactionClient,
@@ -42,6 +43,11 @@ export const MIGRATIONS: readonly Migration[] = [
     id: "0004-global-history-indexes",
     sql: globalHistoryIndexesMigrationSql,
     checksum: checksum(globalHistoryIndexesMigrationSql),
+  },
+  {
+    id: "0005-notification-channels",
+    sql: notificationChannelsMigrationSql,
+    checksum: checksum(notificationChannelsMigrationSql),
   },
 ];
 
