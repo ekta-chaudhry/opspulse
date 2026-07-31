@@ -110,7 +110,7 @@ export async function createHeartbeatMonitor(
       kind, name, published, interval_seconds, failure_threshold, recovery_threshold,
       grace_period_seconds, next_heartbeat_deadline, heartbeat_token_hash,
       heartbeat_token_rotated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz + ($4 + $7) * interval '1 second', $9, $8)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz + ($4::integer + $7::integer) * interval '1 second', $9, $8)
     RETURNING *`,
     [
       monitor.kind,

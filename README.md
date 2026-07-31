@@ -1,15 +1,17 @@
 # OpsPulse
 
-OpsPulse is a self-hosted HTTP monitoring platform that turns scheduled checks into durable incident state operators can inspect and act on.
+OpsPulse is a self-hosted operations monitoring platform that turns HTTP checks and heartbeat pings into durable incident state operators can inspect and act on.
 
 ![OpsPulse operations dashboard](docs/images/dashboard-overview.png)
 
 ## What OpsPulse Does
 
 - Creates and edits HTTP monitors with configurable schedules, timeouts, methods, accepted status ranges, thresholds, and request headers.
-- Runs checks in a separate worker and records latency, HTTP status, and stable failure classifications.
+- Creates heartbeat monitors for cron jobs and background tasks, with one-time ping URL disclosure, hashed token storage, token rotation, and idempotent ping ingestion.
+- Runs checks in a separate worker, records latency or stable failure classifications, and materializes missed heartbeat deadlines.
 - Opens and resolves incidents from configurable consecutive-failure and recovery thresholds.
-- Provides an operations dashboard and cursor-paginated JSON APIs for monitors, checks, and incidents.
+- Queues signed webhook notifications for incident transitions, records delivery attempts, and supports failed-delivery replay.
+- Provides an operations dashboard and cursor-paginated JSON APIs for monitors, checks, incidents, webhook deliveries, and channels.
 - Supports monitor detail, pause, resume, archive, manual refresh, and automatic dashboard refresh.
 
 ## Architecture
@@ -23,15 +25,21 @@ flowchart LR
         M[(monitors)]
         C[(check requests and runs)]
         I[(incidents and events)]
+        N[(notification channels and deliveries)]
     end
 
     A -->|Query and mutate| M
+    A -->|Query and mutate| N
+    A -->|Token-authenticated pings| C
     A -->|Query| C
     A -->|Query| I
     W[Worker] -->|Read monitor config| M
     W -->|Claim and persist checks| C
     W -->|Evaluate incident state| I
+    W -->|Deliver webhooks| N
     W -->|Run HTTP check| T[Monitored service]
+    J[Cron job or task] -->|POST heartbeat URL| A
+    N -->|HTTPS webhook| R[Alert receiver]
 ```
 
 The Compose stack runs PostgreSQL, a one-shot migration service, the Express API with its static dashboard, and one Node.js worker. PostgreSQL is both the system of record and the worker coordination mechanism.
@@ -40,18 +48,22 @@ The Compose stack runs PostgreSQL, a one-shot migration service, the Express API
 
 - **Generation-safe edits:** schedule-affecting changes cancel pending work, increment the monitor generation, and reset sequencing so stale results cannot alter current state.
 - **Monitor-first row locking:** lifecycle changes and check completion lock the monitor before pending check rows, giving concurrent transactions a consistent lock order.
-- **Leases and reclamation:** workers claim checks transactionally with `SKIP LOCKED`; abandoned work becomes reclaimable after `2 * timeoutSeconds + 60s`.
+- **Leases and reclamation:** workers claim checks transactionally with `SKIP LOCKED`; abandoned HTTP work becomes reclaimable after `2 * timeoutSeconds + 60s`.
 - **Contiguous evaluation:** only the active generation's next sequence can advance counters or incident state.
+- **Idempotent heartbeats:** callers can send a stable `Idempotency-Key` so network retries return the same check ID instead of double-counting work.
+- **Token secrecy:** heartbeat tokens are shown only on create or rotation, while the database stores only SHA-256 token hashes.
+- **Deadline reconciliation:** the worker locks heartbeat monitors and records missed deadlines as failure checks before later recovery pings can resolve incidents.
 - **SSRF defenses:** outbound targets are schema-checked, DNS resolution is bounded, non-public IPv4 and IPv6 ranges are rejected, and the request connects to the approved resolved address.
-- **Archived history:** archiving cancels pending work and resolves an open incident while preserving check and incident records for history queries.
+- **Webhook durability:** incident transitions enqueue delivery rows, record attempt outcomes, and retain failed deliveries for inspection and replay.
+- **Archived history:** archiving cancels pending work and resolves an open incident while preserving check, incident, and delivery records for history queries.
 
 ### Monitor configuration
 
-![HTTP monitor configuration](docs/images/monitor-configuration.png)
+![HTTP and heartbeat monitor configuration](docs/images/monitor-configuration.png)
 
-### Check and incident history
+### Check, incident, and delivery history
 
-![Failed check and incident history](docs/images/incident-history.png)
+![Heartbeat and incident history](docs/images/incident-history.png)
 
 ## Quick Start
 
@@ -63,6 +75,18 @@ docker compose up -d --build --wait postgres migrate api worker
 ```
 
 Open [http://127.0.0.1:3000](http://127.0.0.1:3000).
+
+Create a heartbeat monitor through the dashboard or API. The raw token is disclosed only once in the create or rotation response:
+
+```sh
+heartbeat=$(curl -sS -X POST http://127.0.0.1:3000/v1/monitors \
+  -H 'content-type: application/json' \
+  -d '{"kind":"heartbeat","name":"Nightly import","intervalSeconds":60,"gracePeriodSeconds":60}')
+
+ping_path=$(printf '%s' "$heartbeat" | jq -r '.heartbeat.pingPath')
+curl -X POST "http://127.0.0.1:3000${ping_path}" \
+  -H "Idempotency-Key: nightly-import-$(date +%F)"
+```
 
 Stop and remove containers while preserving PostgreSQL data:
 
@@ -86,6 +110,8 @@ docker compose run --rm failure-scenario
 
 It creates an HTTP monitor for a deliberately unresolvable host, waits for the worker to classify `dns/ENOTFOUND`, and prints a compact JSON result with the monitor, check, and incident IDs. Inspect the resulting state in the dashboard.
 
+To exercise webhook delivery visibility locally, create a webhook channel, attach it to a monitor, and let an incident transition occur. Delivery rows are visible in the dashboard and through `GET /v1/deliveries`; failed delivery rows can be replayed with `POST /v1/deliveries/:deliveryId/replay` and an explicit replay key.
+
 ## Verification
 
 The repository is guarded by 500+ automated tests. Run the unit suite alone or the full build, lint, typecheck, and test gate:
@@ -105,4 +131,4 @@ docker compose run --rm -e VERIFY_EXISTING=1 smoke
 
 ## Current Scope
 
-OpsPulse currently implements local HTTP monitoring only. Authentication, heartbeat monitoring, notifications, and public status pages are not implemented. The dashboard and API are unauthenticated, and Compose publishes the API only on host loopback; this repository is intended for local evaluation rather than production deployment. No license has been selected.
+OpsPulse currently implements local HTTP monitoring, heartbeat monitoring, incident history, signed webhook notifications, delivery visibility, and failed-delivery replay. Authentication and public status pages are not implemented. The dashboard and API are unauthenticated, and Compose publishes the API only on host loopback; this repository is intended for local evaluation rather than production deployment. No license has been selected.
