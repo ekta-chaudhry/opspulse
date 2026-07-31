@@ -24,10 +24,16 @@ export {
 export type { CheckHistoryFilter, IncidentHistoryFilter } from "./history.js";
 export { MIGRATIONS, MIGRATION_LOCK_KEY, runMigrations } from "./migrations.js";
 export type { Migration, MigrationClient } from "./migrations.js";
-export { createIncidentNotificationDeliveries } from "./notification-deliveries.js";
+export {
+  claimDueNotificationDelivery,
+  createIncidentNotificationDeliveries,
+  recordNotificationAttempt,
+} from "./notification-deliveries.js";
 export type {
   IncidentNotificationMonitor,
   IncidentNotificationTransition,
+  NotificationAttemptInput,
+  NotificationDeliveryWorkItem,
 } from "./notification-deliveries.js";
 export {
   archiveNotificationChannel,

@@ -13,13 +13,14 @@ const workItem = {
     monitorId: "22222222-2222-4222-8222-222222222222",
   },
 } as HttpCheckWorkItem;
+const httpWorkItem = { kind: "http_check" as const, workItem };
 
 describe("runPollingLoop", () => {
   it("checks claimed work one at a time and sleeps when idle", async () => {
     const controller = new AbortController();
     const claim = vi
-      .fn<() => Promise<HttpCheckWorkItem | null>>()
-      .mockResolvedValueOnce(workItem)
+      .fn<() => Promise<typeof httpWorkItem | null>>()
+      .mockResolvedValueOnce(httpWorkItem)
       .mockResolvedValueOnce(null);
     const check = vi.fn(() => Promise.resolve());
     const sleep = vi.fn((milliseconds: number) => {
@@ -40,7 +41,7 @@ describe("runPollingLoop", () => {
 
     expect(claim).toHaveBeenCalledTimes(2);
     expect(check).toHaveBeenCalledOnce();
-    expect(check).toHaveBeenCalledWith(workItem, controller.signal);
+    expect(check).toHaveBeenCalledWith(httpWorkItem, controller.signal);
     expect(log).toHaveBeenCalledWith({
       event: "http_check_completed",
       requestId: workItem.request.id,
@@ -79,7 +80,7 @@ describe("runPollingLoop", () => {
 
   it("stops cleanly without logging completion when an active check is aborted", async () => {
     const controller = new AbortController();
-    const check = vi.fn((_item: HttpCheckWorkItem, signal: AbortSignal) => {
+    const check = vi.fn((_item: typeof httpWorkItem, signal: AbortSignal) => {
       expect(signal).toBe(controller.signal);
       controller.abort();
       return Promise.resolve();
@@ -89,13 +90,13 @@ describe("runPollingLoop", () => {
     await runPollingLoop({
       pollIntervalMs: 500,
       signal: controller.signal,
-      claim: vi.fn(() => Promise.resolve(workItem)),
+      claim: vi.fn(() => Promise.resolve(httpWorkItem)),
       check,
       sleep: vi.fn(() => Promise.resolve()),
       log,
     });
 
-    expect(check).toHaveBeenCalledWith(workItem, controller.signal);
+    expect(check).toHaveBeenCalledWith(httpWorkItem, controller.signal);
     expect(log).not.toHaveBeenCalledWith(expect.objectContaining({
       event: "http_check_completed",
     }));
@@ -151,7 +152,7 @@ describe("startWorker", () => {
     const options = loopOptions;
     if (options === undefined) throw new Error("polling options were not captured");
     await options.claim();
-    await options.check(workItem, options.signal);
+    await options.check(httpWorkItem, options.signal);
 
     expect(createPool).toHaveBeenCalledWith({
       connectionString: "postgresql://localhost/opspulse",
@@ -220,7 +221,7 @@ describe("startWorker", () => {
     );
     const options = loopOptions;
     if (options === undefined) throw new Error("polling options were not captured");
-    await options.check(workItem, options.signal);
+    await options.check(httpWorkItem, options.signal);
     const requestSignal = checkHttpMonitor.mock.calls[0]?.[2];
 
     const closing = runtime.close("internal");
