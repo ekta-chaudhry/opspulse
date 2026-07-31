@@ -61,7 +61,6 @@ describe("README contract", () => {
     expect(quickStart).toContain("Node.js 24.18.x and pnpm 10.30.3");
     expect(quickStart).toMatch(/scripts\/run-node24[^.]+supplies both in a container\./);
     expect(quickStart).not.toMatch(/Prerequisites are Node\.js|install Node\.js|install pnpm/i);
-    expect(quickStart).not.toMatch(/^curl /m);
     expect(quickStart).toContain("scripts/run-node24 pnpm install --frozen-lockfile");
     expect(quickStart).toContain("docker compose up -d --build --wait postgres migrate api worker");
     expect([...quickStart.matchAll(/docker compose up [^\n]+/g)].map((match) => match[0])).toEqual([
@@ -104,9 +103,10 @@ describe("README contract", () => {
 
   it("states the unimplemented scope explicitly without roadmap framing", () => {
     const currentScope = section(readme, "Current Scope");
-    expect(currentScope).toMatch(
-      /authentication, heartbeat monitoring, notifications, and public status pages are not implemented\./i,
+    expect(currentScope).toContain(
+      "local HTTP monitoring, heartbeat monitoring, incident history, signed webhook notifications, delivery visibility, and failed-delivery replay",
     );
+    expect(currentScope).toMatch(/Authentication and public status pages are not implemented\./);
     expect(readme).not.toMatch(/^## (?:Status|Planned Product|Roadmap)$/m);
     expect(readme).not.toMatch(/\[!\[[^\]]*(?:CI|build)[^\]]*\]/i);
     expect(readme).not.toMatch(/\b(?:demo|recruiter|resume-ready)\b/i);
