@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@opspulse/contracts": "workspace:*",
-    "@opspulse/database": "workspace:*"
+    "@opspulse/database": "workspace:*",
+    "@opspulse/domain": "workspace:*"
   }
 }

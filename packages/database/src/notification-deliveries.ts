@@ -4,7 +4,7 @@ import {
   buildIncidentResolvedWebhook,
   serializeWebhookPayload,
 } from "@opspulse/domain";
-import type { TransactionClient } from "./transaction.js";
+import { withTransaction, type TransactionClient, type TransactionPool } from "./transaction.js";
 
 export type IncidentNotificationTransition =
   | {
@@ -30,6 +30,83 @@ type NotificationChannelDestination = {
   webhook_url: string;
   signing_secret: string;
 };
+
+export type NotificationDeliveryWorkItem = {
+  id: string;
+  incidentEventId: string;
+  channelId: string;
+  webhookUrl: string;
+  signingSecret: string;
+  payload: unknown;
+  attemptCount: number;
+  replayOfDeliveryId: string | null;
+};
+
+export type NotificationAttemptInput = {
+  outcome: "delivered" | "retryable_failure" | "final_failure";
+  responseStatus: number | null;
+  safeError: string | null;
+};
+
+const MAX_NOTIFICATION_ATTEMPTS = 6;
+
+function safeInteger(value: unknown, column: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+    throw new TypeError(`${column} must be a safe integer`);
+  }
+  return value;
+}
+
+function nullableString(value: unknown, column: string): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string") throw new TypeError(`${column} must be a string or null`);
+  return value;
+}
+
+function requiredString(value: unknown, column: string): string {
+  if (typeof value !== "string") throw new TypeError(`${column} must be a string`);
+  return value;
+}
+
+function toNotificationDeliveryWorkItem(row: unknown): NotificationDeliveryWorkItem {
+  if (typeof row !== "object" || row === null) {
+    throw new TypeError("notification delivery row must be an object");
+  }
+  const value = row as Record<string, unknown>;
+  return {
+    id: requiredString(value.id, "id"),
+    incidentEventId: requiredString(value.incident_event_id, "incident_event_id"),
+    channelId: requiredString(value.channel_id, "channel_id"),
+    webhookUrl: requiredString(value.webhook_url, "webhook_url"),
+    signingSecret: requiredString(value.signing_secret, "signing_secret"),
+    payload: value.payload,
+    attemptCount: safeInteger(value.attempt_count, "attempt_count"),
+    replayOfDeliveryId: nullableString(value.replay_of_delivery_id, "replay_of_delivery_id"),
+  };
+}
+
+function retryDelayMilliseconds(attemptNumber: number): number {
+  const delays = [30_000, 60_000, 300_000, 900_000, 1_800_000] as const;
+  return delays[Math.min(attemptNumber - 1, delays.length - 1)] ?? 1_800_000;
+}
+
+function validateAttempt(input: NotificationAttemptInput): NotificationAttemptInput {
+  if (input.outcome === "delivered") {
+    if (input.responseStatus === null || input.responseStatus < 200 || input.responseStatus > 299) {
+      throw new TypeError("delivered attempts require a 2xx response status");
+    }
+    if (input.safeError !== null) throw new TypeError("delivered attempts cannot have a safe error");
+  } else if (input.responseStatus === null && input.safeError === null) {
+    throw new TypeError("failed attempts require a response status or safe error");
+  }
+  if (
+    input.responseStatus !== null &&
+    (!Number.isInteger(input.responseStatus) || input.responseStatus < 100 || input.responseStatus > 599)
+  ) {
+    throw new TypeError("responseStatus must be null or an HTTP status");
+  }
+  return input;
+}
 
 function slugify(value: string): string {
   const slug = value
@@ -102,6 +179,94 @@ async function appendNotificationQueuedEvent(
       }),
     ],
   );
+}
+
+export async function claimDueNotificationDelivery(
+  pool: TransactionPool,
+  now: Date = new Date(),
+): Promise<NotificationDeliveryWorkItem | null> {
+  return withTransaction(pool, async (client) => {
+    const result = await client.query(
+      `SELECT *
+      FROM notification_deliveries
+      WHERE status IN ('queued', 'retrying')
+        AND next_attempt_at <= $1
+      ORDER BY next_attempt_at, id
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED`,
+      [now],
+    );
+    const row = result.rows[0];
+    return row === undefined ? null : toNotificationDeliveryWorkItem(row);
+  });
+}
+
+export async function recordNotificationAttempt(
+  pool: TransactionPool,
+  deliveryId: string,
+  input: NotificationAttemptInput,
+  now: Date = new Date(),
+): Promise<void> {
+  const attempt = validateAttempt(input);
+  await withTransaction(pool, async (client) => {
+    const locked = await client.query(
+      `SELECT id, attempt_count, status
+      FROM notification_deliveries
+      WHERE id = $1
+      FOR UPDATE`,
+      [deliveryId],
+    );
+    const row = locked.rows[0] as { attempt_count?: unknown; status?: unknown } | undefined;
+    if (row === undefined) throw new Error("notification delivery does not exist");
+    if (row.status === "delivered" || row.status === "failed") return;
+    const nextAttempt = safeInteger(row.attempt_count, "attempt_count") + 1;
+    if (nextAttempt > MAX_NOTIFICATION_ATTEMPTS) {
+      throw new Error("notification delivery exhausted attempts");
+    }
+    await client.query(
+      `INSERT INTO notification_attempts (
+        delivery_id, attempt_number, started_at, completed_at, outcome,
+        response_status, safe_error
+      ) VALUES ($1, $2, $3, $3, $4, $5, $6)`,
+      [
+        deliveryId,
+        nextAttempt,
+        now,
+        attempt.outcome,
+        attempt.responseStatus,
+        attempt.safeError,
+      ],
+    );
+
+    const exhausted = nextAttempt >= MAX_NOTIFICATION_ATTEMPTS;
+    const status = attempt.outcome === "delivered"
+      ? "delivered"
+      : attempt.outcome === "final_failure" || exhausted
+        ? "failed"
+        : "retrying";
+    const nextAttemptAt = status === "retrying"
+      ? new Date(now.getTime() + retryDelayMilliseconds(nextAttempt))
+      : null;
+    await client.query(
+      `UPDATE notification_deliveries
+      SET status = $2,
+          attempt_count = $3,
+          next_attempt_at = $4,
+          last_response_status = $5,
+          last_safe_error = $6,
+          updated_at = $7
+      WHERE id = $1`,
+      [
+        deliveryId,
+        status,
+        nextAttempt,
+        nextAttemptAt,
+        attempt.responseStatus,
+        attempt.safeError,
+        now,
+      ],
+    );
+  });
 }
 
 export async function createIncidentNotificationDeliveries(

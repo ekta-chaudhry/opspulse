@@ -51,6 +51,9 @@ importers:
       '@opspulse/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@opspulse/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
 
   packages/contracts:
     dependencies:

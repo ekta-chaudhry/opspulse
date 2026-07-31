@@ -1,10 +1,12 @@
 import {
   claimDueHttpCheck,
+  claimDueNotificationDelivery,
   completeHttpCheck,
   createDatabasePool,
   type DatabasePoolConfig,
   type HttpCheckOutcome,
   type HttpCheckWorkItem,
+  type NotificationDeliveryWorkItem,
   type TransactionPool,
 } from "@opspulse/database";
 import { pathToFileURL } from "node:url";
@@ -18,6 +20,11 @@ import {
   type SafeHttpRequest,
   type SafeHttpResult,
 } from "./safe-client.js";
+import {
+  defaultNotifierDependencies,
+  deliverNotification,
+  type NotifierDependencies,
+} from "./notifier.js";
 
 type ShutdownReason = "SIGINT" | "SIGTERM" | "internal";
 type LogValue = string | number | boolean | null;
@@ -27,11 +34,15 @@ type WorkerPool = TransactionPool & {
   end(): Promise<void>;
 };
 
+export type WorkerWorkItem =
+  | { kind: "http_check"; workItem: HttpCheckWorkItem }
+  | { kind: "notification_delivery"; workItem: NotificationDeliveryWorkItem };
+
 export type PollingLoopOptions = {
   pollIntervalMs: number;
   signal: AbortSignal;
-  claim(): Promise<HttpCheckWorkItem | null>;
-  check(workItem: HttpCheckWorkItem, signal: AbortSignal): Promise<unknown>;
+  claim(): Promise<WorkerWorkItem | null>;
+  check(workItem: WorkerWorkItem, signal: AbortSignal): Promise<unknown>;
   sleep(milliseconds: number): Promise<void>;
   log(entry: LogEntry): void;
 };
@@ -39,6 +50,7 @@ export type PollingLoopOptions = {
 export type WorkerRuntimeDependencies = {
   createPool(config: DatabasePoolConfig): WorkerPool;
   claimDueHttpCheck(pool: TransactionPool): Promise<HttpCheckWorkItem | null>;
+  claimDueNotificationDelivery(pool: TransactionPool): Promise<NotificationDeliveryWorkItem | null>;
   completeHttpCheck(
     pool: TransactionPool,
     requestId: string,
@@ -47,6 +59,11 @@ export type WorkerRuntimeDependencies = {
   checkHttpMonitor(
     workItem: HttpCheckWorkItem,
     dependencies: CheckerDependencies,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
+  deliverNotification(
+    workItem: NotificationDeliveryWorkItem,
+    dependencies: NotifierDependencies,
     signal?: AbortSignal,
   ): Promise<unknown>;
   execute(input: SafeHttpRequest): Promise<SafeHttpResult>;
@@ -83,8 +100,10 @@ function abortableSleep(milliseconds: number, signal: AbortSignal): Promise<void
 const defaultDependencies: WorkerRuntimeDependencies = {
   createPool: createDatabasePool,
   claimDueHttpCheck,
+  claimDueNotificationDelivery,
   completeHttpCheck,
   checkHttpMonitor,
+  deliverNotification,
   execute: executeSafeHttp,
   runLoop: runPollingLoop,
   sleep: abortableSleep,
@@ -106,11 +125,18 @@ export async function runPollingLoop(options: PollingLoopOptions): Promise<void>
       }
       await options.check(workItem, options.signal);
       if (isAborted(options.signal)) break;
-      options.log({
-        event: "http_check_completed",
-        requestId: workItem.request.id,
-        monitorId: workItem.request.monitorId,
-      });
+      if (workItem.kind === "http_check") {
+        options.log({
+          event: "http_check_completed",
+          requestId: workItem.workItem.request.id,
+          monitorId: workItem.workItem.request.monitorId,
+        });
+      } else {
+        options.log({
+          event: "notification_delivery_attempted",
+          deliveryId: workItem.workItem.id,
+        });
+      }
     } catch {
       if (isAborted(options.signal)) break;
       options.log({ event: "worker_iteration_failed", category: "internal" });
@@ -131,14 +157,25 @@ export function startWorker(
     complete: (requestId, outcome) =>
       dependencies.completeHttpCheck(pool, requestId, outcome),
   };
+  const notifierDependencies = defaultNotifierDependencies(pool);
   const done = dependencies.runLoop({
     pollIntervalMs: config.pollIntervalMs,
     signal: controller.signal,
-    claim: () => dependencies.claimDueHttpCheck(pool),
-    check: (workItem) =>
-      dependencies.checkHttpMonitor(
-        workItem,
+    claim: async () => {
+      const httpCheck = await dependencies.claimDueHttpCheck(pool);
+      if (httpCheck !== null) return { kind: "http_check", workItem: httpCheck };
+      const delivery = await dependencies.claimDueNotificationDelivery(pool);
+      return delivery === null ? null : { kind: "notification_delivery", workItem: delivery };
+    },
+    check: (workItem) => workItem.kind === "http_check"
+      ? dependencies.checkHttpMonitor(
+        workItem.workItem,
         checkerDependencies,
+        requestController.signal,
+      )
+      : dependencies.deliverNotification(
+        workItem.workItem,
+        notifierDependencies,
         requestController.signal,
       ),
     sleep: (milliseconds) => dependencies.sleep(milliseconds, controller.signal),
